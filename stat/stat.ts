@@ -121,8 +121,20 @@ class StatPlugin extends Plugin {
       unreadDialogs: 0
     };
 
-    // 获取所有对话
-    const dialogs = await client.getDialogs({ limit: undefined });
+    // 获取所有对话（使用重试机制处理偶发的数据不完整问题）
+    let dialogs: any[] = [];
+    let retries = 3;
+    while (retries > 0) {
+      try {
+        dialogs = await client.getDialogs({ limit: undefined });
+        break;
+      } catch (e: any) {
+        retries--;
+        if (retries === 0) throw e;
+        // 短暂延迟后重试
+        await new Promise(r => setTimeout(r, 500));
+      }
+    }
 
     for (const dialog of dialogs) {
       const entity = dialog.entity;
