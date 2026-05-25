@@ -1,16 +1,18 @@
 /**
  * UAI 插件 - 引用消息 AI 分析
- * 引用某用户/频道的消息，回复 .uai zj/fx 进行总结/分析
+ * 引用某用户/频道的消息，回复 ${mainPrefix}uai zj/fx 进行总结/分析
  * 支持消息折叠显示，保持AI回答中的HTML格式
  */
 import { Plugin } from "@utils/pluginBase";
 import { getPrefixes } from "@utils/pluginManager";
-import { Api } from "telegram";
+import { Api } from "teleproto";
 import axios from "axios";
 import { JSONFilePreset } from "lowdb/node";
 import * as path from "path";
 import { createDirectoryInAssets } from "@utils/pathHelpers";
 import { getGlobalClient } from "@utils/globalClient";
+import { TelegramFormatter } from "@utils/telegramFormatter";
+import { safeGetMessages } from "@utils/safeGetMessages";
 
 const prefixes = getPrefixes();
 const mainPrefix = prefixes[0];
@@ -64,13 +66,6 @@ function htmlEscape(t: string): string {
         .replace(/'/g, "&#39;");
 }
 
-// HTML转义函数（确保用户输入安全）
-const escapeHtml = (text: string): string => 
-    text.replace(/[&<>"']/g, m => ({ 
-        '&': '&amp;', '<': '&lt;', '>': '&gt;', 
-        '"': '&quot;', "'": '&#x27;' 
-    }[m] || m));
-
 // 应用折叠功能
 const applyWrap = (s: string, collapse?: boolean): string => {
     if (!collapse) return s;
@@ -78,25 +73,6 @@ const applyWrap = (s: string, collapse?: boolean): string => {
     if (/<blockquote(?:\s|>|\/)\/?>/i.test(s)) return s;
     return `<blockquote expandable>${s}</blockquote>`;
 };
-
-// Markdown 转 Telegram HTML，保留特殊格式
-function markdownToHtml(text: string): string {
-    return text
-        // 粗体 **text** 或 __text__
-        .replace(/\*\*(.+?)\*\*/g, "<b>$1</b>")
-        .replace(/__(.+?)__/g, "<b>$1</b>")
-        // 斜体 *text* 或 _text_
-        .replace(/(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)/g, "<i>$1</i>")
-        .replace(/(?<!_)_(?!_)(.+?)(?<!_)_(?!_)/g, "<i>$1</i>")
-        // 代码 `code`
-        .replace(/`([^`]+)`/g, "<code>$1</code>")
-        // 删除线 ~~text~~
-        .replace(/~~(.+?)~~/g, "<s>$1</s>")
-        // 保留已有的HTML标签
-        .replace(/&lt;(.+?)&gt;/g, "<$1>")
-        // 处理块引用 > text
-        .replace(/^&gt;\s?(.+)$/gm, "<blockquote>$1</blockquote>");
-}
 
 function trimBase(url: string): string {
     return url.replace(/\/$/, "");
@@ -319,8 +295,7 @@ const getHelpText = () => `⚙️ <b>UAI - 用户消息AI分析</b>
 • <code>${mainPrefix}uai 自定义名</code> - 使用自定义提示词
 
 <b>⚙️ 折叠显示:</b>
-• <code>${mainPrefix}uai collapse on</code> - 开启AI回答折叠
-• <code>${mainPrefix}uai collapse off</code> - 关闭AI回答折叠
+• <code>${mainPrefix}uai collapse on/off</code> - 开启或关闭 AI 回答折叠
 
 <b>🔌 供应商配置:</b>
 • <code>${mainPrefix}uai add &lt;名称&gt; &lt;url&gt; &lt;key&gt; &lt;type&gt;</code> - 添加供应商
@@ -344,12 +319,16 @@ const getHelpText = () => `⚙️ <b>UAI - 用户消息AI分析</b>
 • 数量格式: 50(最近50条)
 
 <b>🔍 使用示例:</b>
-1. 引用用户消息，回复: <code>.uai zj</code> - 总结当天消息
-2. 引用用户消息，回复: <code>.uai fx 100</code> - 分析最近100条
-3. 引用频道消息，回复: <code>.uai zj</code> - 总结频道消息`;
+1. 引用用户消息，回复: <code>${mainPrefix}uai zj</code> - 总结当天消息
+2. 引用用户消息，回复: <code>${mainPrefix}uai fx 100</code> - 分析最近100条
+3. 引用频道消息，回复: <code>${mainPrefix}uai zj</code> - 总结频道消息`;
 
 // ========== 插件类 ==========
 class UAIPlugin extends Plugin {
+    cleanup(): void {
+  }
+
+
     name = "uai";
     description = () => getHelpText();
 
@@ -522,7 +501,7 @@ class UAIPlugin extends Plugin {
 
             // 检查 AI 配置
             if (!db.data.default_provider || !db.data.providers[db.data.default_provider]) {
-                await msg.edit({ text: "❌ 请先配置 AI 供应商\n\n使用: <code>.uai add 名称 url key type</code>", parseMode: "html" });
+                await msg.edit({ text: "❌ 请先配置 AI 供应商\n\n使用: <code>${mainPrefix}uai add 名称 url key type</code>", parseMode: "html" });
                 return;
             }
 
@@ -561,7 +540,7 @@ class UAIPlugin extends Plugin {
                 if (!replyToId) throw new Error("无法获取引用消息");
 
                 const chatPeerId = msg.peerId;  // 使用 peerId 而不是 chatId 字符串
-                const [repliedMsg] = await client.getMessages(chatPeerId, { ids: [replyToId] });
+                const [repliedMsg] = await safeGetMessages(client, chatPeerId, { ids: [replyToId] });
                 if (!repliedMsg) throw new Error("引用的消息不存在");
 
                 // 获取来源：发送者 或 转发来源
@@ -600,7 +579,7 @@ class UAIPlugin extends Plugin {
                         const result = await callAI(provider, prompt, `${userInfo}\n\n${content}`, db.data.timeout);
                         
                         // 处理AI回答，保留格式并应用折叠
-                        const aiContent = markdownToHtml(result);
+                        const aiContent = TelegramFormatter.markdownToHtml(result, { collapseSafe: db.data.collapse });
                         const foldedContent = applyWrap(aiContent, db.data.collapse);
                         
                         const resultText = `📊 <b>${promptKey === "zj" ? "总结" : "分析"}结果</b>（${displayName}，${messages.length} 条）\n\n${foldedContent}`;
@@ -651,7 +630,7 @@ class UAIPlugin extends Plugin {
                 const result = await callAI(provider, prompt, `${userInfo}\n\n${content}`, db.data.timeout);
                 
                 // 处理AI回答，保留格式并应用折叠
-                const aiContent = markdownToHtml(result);
+                const aiContent = TelegramFormatter.markdownToHtml(result, { collapseSafe: db.data.collapse });
                 const foldedContent = applyWrap(aiContent, db.data.collapse);
                 
                 const resultText = `📊 <b>${promptKey === "zj" ? "总结" : "分析"}结果</b>（${displayName}，${messages.length} 条）\n\n${foldedContent}`;
@@ -664,10 +643,6 @@ class UAIPlugin extends Plugin {
             }
         }
     };
-
-    async cleanup(): Promise<void> {
-        // 无需清理资源
-    }
 }
 
 export default new UAIPlugin();

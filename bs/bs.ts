@@ -5,9 +5,10 @@ import { createDirectoryInAssets } from "@utils/pathHelpers";
 import type { Low } from "lowdb";
 import { JSONFilePreset } from "lowdb/node";
 import * as path from "path";
-import { Api } from "telegram";
-import { sleep } from "telegram/Helpers";
-import { RPCError } from "telegram/errors";
+import { Api } from "teleproto";
+import { sleep } from "teleproto/Helpers";
+import { RPCError } from "teleproto/errors";
+import { safeGetMessages, safeGetReplyMessage } from "@utils/safeGetMessages";
 
 const prefixes = getPrefixes();
 const mainPrefix = prefixes[0];
@@ -129,12 +130,14 @@ async function formatEntity(
   }
   const displayParts: string[] = [];
 
-  if (entity?.title) displayParts.push(entity.title);
-  if (entity?.firstName) displayParts.push(entity.firstName);
-  if (entity?.lastName) displayParts.push(entity.lastName);
+  if (entity?.title) displayParts.push(escapeHtml(entity.title));
+  if (entity?.firstName) displayParts.push(escapeHtml(entity.firstName));
+  if (entity?.lastName) displayParts.push(escapeHtml(entity.lastName));
   if (entity?.username)
     displayParts.push(
-      mention ? `@${entity.username}` : `<code>@${entity.username}</code>`
+      mention
+        ? escapeHtml(`@${entity.username}`)
+        : `<code>@${escapeHtml(entity.username)}</code>`
     );
 
   if (id) {
@@ -570,7 +573,7 @@ async function collectMessages(
 
   while (messageIds.length < desiredCount && currentId < startId + maxSearch) {
     try {
-      const fetched = await client.getMessages(peer, {
+      const fetched = await safeGetMessages(client, peer, {
         ids: [currentId],
       });
       const candidate = Array.isArray(fetched) ? fetched[0] : fetched;
@@ -708,6 +711,7 @@ async function sendTargetFeedback(options: {
 const helpResponse = `🛰️ <b>保送插件</b>\n\n${escapeHtml(helpText)}`;
 
 class BsPlugin extends Plugin {
+
   description: string = `保送被回复的消息至指定目标\n\n${helpText}`;
 
   cmdHandlers: Record<string, (msg: Api.Message) => Promise<void>> = {
@@ -744,7 +748,7 @@ class BsPlugin extends Plugin {
           return;
         }
 
-        const replyMessage = await msg.getReplyMessage();
+        const replyMessage = await safeGetReplyMessage(msg);
         if (!replyMessage) {
           await msg.edit({
             text: "❌ <b>无法获取被回复的消息</b>",

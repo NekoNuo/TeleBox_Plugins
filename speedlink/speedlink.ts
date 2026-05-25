@@ -1,5 +1,5 @@
-import { Plugin } from "../src/utils/pluginBase";
-import { Api } from "telegram";
+import { Plugin } from "@utils/pluginBase";
+import { Api } from "teleproto";
 import { exec, execSync, ChildProcess } from "child_process";
 import { promisify } from "util";
 import * as path from "path";
@@ -7,10 +7,11 @@ import * as fs from "fs";
 import axios from "axios";
 import * as crypto from "crypto";
 import sharp from "sharp";
+import { safeGetReplyMessage } from "@utils/safeGetMessages";
 import {
   createDirectoryInAssets,
   createDirectoryInTemp,
-} from "../src/utils/pathHelpers";
+} from "@utils/pathHelpers";
 
 // --- Global variables for test control ---
 let DEFAULT_TIMEOUT = 300000; // Default 5 minutes, can be customized
@@ -456,7 +457,7 @@ const speedtest = async (msg: Api.Message): Promise<void> => {
       } else {
         const currentTimeout = DEFAULT_TIMEOUT / 1000;
         await msg.edit({
-          text: `ℹ️ <b>当前超时设置</b>\n\n超时时间: <code>${currentTimeout}</code> 秒\n\n使用 <code>sl timeout &lt;秒数&gt;</code> 来修改`,
+            text: `ℹ️ <b>当前超时设置</b>\n\n超时时间: <code>${currentTimeout}</code> 秒\n\n使用 <code>sl timeout &lt;秒数&gt;</code> 来修改`,
           parseMode: "html",
         });
       }
@@ -623,7 +624,7 @@ const speedtest = async (msg: Api.Message): Promise<void> => {
           });
           return;
         }
-        const repliedMsg = await msg.getReplyMessage();
+        const repliedMsg = await safeGetReplyMessage(msg);
         if (!repliedMsg?.document) {
           await msg.edit({
             text: `❌ <b>恢复失败</b>\n\n您回复的消息不包含文件。`,
@@ -954,6 +955,7 @@ const speedtest = async (msg: Api.Message): Promise<void> => {
 
 // --- Plugin class ---
 class SpeedlinkPlugin extends Plugin {
+
   description: string = `⚡️ 网络速度测试工具 (多服务器)\n\n${HELP_TEXT}`;
   cmdHandlers: Record<string, (msg: Api.Message) => Promise<void>> = {
     speedlink: speedtest,

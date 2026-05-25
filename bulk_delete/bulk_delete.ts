@@ -1,8 +1,15 @@
-import { Api } from "telegram";
+import { Api } from "teleproto";
 import { Plugin } from "@utils/pluginBase";
+import { getPrefixes } from "@utils/pluginManager";
 import { createDirectoryInAssets } from "@utils/pathHelpers";
 import { JSONFilePreset } from "lowdb/node";
 import path from "path";
+import { safeGetMessages } from "@utils/safeGetMessages";
+
+import { safeGetMe } from "@utils/authGuards";
+const prefixes = getPrefixes();
+const mainPrefix = prefixes[0];
+
 
 // 数据库文件路径
 const filePath = path.join(createDirectoryInAssets("bd"), "bd_config.json");
@@ -51,7 +58,8 @@ const bd = async (msg: Api.Message) => {
   if (!client) return;
 
   const chatId = msg.chatId;
-  const me = await client.getMe();
+  const me = await safeGetMe(client);
+           if (!me) return;
   const userId = me.id.toString();
 
   // --- 处理开关命令 ---
@@ -66,7 +74,7 @@ const bd = async (msg: Api.Message) => {
     const feedbackMsg = await client.sendMessage(chatId, {
       message: `✅ 已${status}删除他人消息权限。`,
     });
-    setTimeout(async () => {
+    scheduleTimer(async () => {
       await client.deleteMessages(chatId, [feedbackMsg.id, msg.id], {
         revoke: true,
       });
@@ -85,7 +93,7 @@ const bd = async (msg: Api.Message) => {
       let count = 0;
 
       // 获取最近的消息
-      const recentMessages = await client.getMessages(chatId, { limit: 100 });
+      const recentMessages = await safeGetMessages(client, chatId, { limit: 100 });
       const filteredMessages = recentMessages.filter((m: Api.Message) => {
         return m.senderId?.equals(me.id) && m.id !== msg.id;
       });
@@ -108,7 +116,7 @@ const bd = async (msg: Api.Message) => {
         // ======================= 代码修正部分 END =========================
         
         // 2秒后删除反馈消息
-        setTimeout(async () => {
+        scheduleTimer(async () => {
           await client.deleteMessages(chatId, [feedbackMsg.id], {
             revoke: true,
           });
@@ -126,7 +134,7 @@ const bd = async (msg: Api.Message) => {
       message: `⚠️ 请回复一条消息以确定删除范围，或使用 \`.bd <数字>\` 删除您最近的消息。\n💡 当前删除他人权限: ${currentMode} (.bd on/off 切换)`,
     });
     // 3秒后删除提示和指令消息
-    setTimeout(async () => {
+    scheduleTimer(async () => {
       await client.deleteMessages(chatId, [sentMsg.id, msg.id], {
         revoke: true,
       });
@@ -135,7 +143,7 @@ const bd = async (msg: Api.Message) => {
   }
 
   // --- 2. 处理回复消息的情况
-  const startMessage = await client.getMessages(chatId, {
+  const startMessage = await safeGetMessages(client, chatId, {
     ids: [msg.replyTo.replyToMsgId],
   });
   const startMsg = startMessage[0];
@@ -185,7 +193,7 @@ const bd = async (msg: Api.Message) => {
   let successfullyCollected = 0;
 
   try {
-    const messages = await client.getMessages(chatId, {
+    const messages = await safeGetMessages(client, chatId, {
       minId: startId - 1,
       maxId: endId + 1,
       limit: 100, // 注意: Telegram限制单次最多获取100条
@@ -209,7 +217,7 @@ const bd = async (msg: Api.Message) => {
     const sentMsg = await client.sendMessage(chatId, {
       message: "❌ 收集消息列表时出错。",
     });
-    setTimeout(async () => {
+    scheduleTimer(async () => {
       await client.deleteMessages(chatId, [sentMsg.id, msg.id], {
         revoke: true,
       });
@@ -230,7 +238,7 @@ const bd = async (msg: Api.Message) => {
       message: `🚫 您没有删除该范围内消息的权限。${modeStatus}`,
       replyTo: startMsg,
     });
-    setTimeout(async () => {
+    scheduleTimer(async () => {
       await client.deleteMessages(chatId, [feedbackMsg.id, msg.id], {
         revoke: true,
       });
@@ -239,10 +247,31 @@ const bd = async (msg: Api.Message) => {
 };
 
 class BulkDeletePlugin extends Plugin {
-  description: string = `回复消息并使用 .bd, 删除从被回复的消息到当前指令之间的所有消息。或使用 .bd <数字> 删除您最近的消息。使用 .bd on/off 切换删除他人消息的权限。`;
+
+  description: string = `回复消息并使用 ${mainPrefix}bd, 删除从被回复的消息到当前指令之间的所有消息。或使用 ${mainPrefix}bd ＜数字＞ 删除您最近的消息。使用 ${mainPrefix}bd on/off 切换删除他人消息的权限。`;
   cmdHandlers: Record<string, (msg: Api.Message) => Promise<void>> = {
     bd,
   };
+  cleanup(): void {
+    for (const timer of pendingTimers) {
+      clearTimeout(timer);
+    }
+    pendingTimers.clear();
+  }
 }
 
 export default new BulkDeletePlugin();
+
+// Timer tracking for safe cleanup
+const pendingTimers = new Set<ReturnType<typeof setTimeout>>();
+
+function scheduleTimer(fn: () => void, ms: number): ReturnType<typeof setTimeout> {
+  const t = setTimeout(() => {
+    pendingTimers.delete(t);
+    fn();
+  }, ms);
+  pendingTimers.add(t);
+  return t;
+}
+
+

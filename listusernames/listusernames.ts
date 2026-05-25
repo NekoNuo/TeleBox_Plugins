@@ -1,6 +1,10 @@
 import { Plugin } from "@utils/pluginBase";
-import { Api } from "telegram";
+import { Api } from "teleproto";
 import { getGlobalClient } from "@utils/globalClient";
+import { getPrefixes } from "@utils/pluginManager";
+
+const prefixes = getPrefixes();
+const mainPrefix = prefixes[0];
 
 // HTML转义函数（必需）
 const htmlEscape = (text: string): string => 
@@ -9,19 +13,22 @@ const htmlEscape = (text: string): string =>
     '"': '&quot;', "'": '&#x27;' 
   }[m] || m));
 
+const codeTag = (text: string | number): string => `<code>${htmlEscape(String(text))}</code>`;
+
 const help_text = `📋 <b>listusernames - 列出公开群组/频道</b>
 
 <b>命令格式：</b>
-<code>.listusernames</code>
+<code>${mainPrefix}listusernames</code>
 
 <b>功能说明：</b>
 • 列出所有属于自己的公开群组/频道
 • 所有用户均可使用
 
 <b>使用示例：</b>
-<code>.listusernames</code>`;
+<code>${mainPrefix}listusernames</code>`;
 
 class ListUsernamesPlugin extends Plugin {
+
   description = help_text;
   
   cmdHandlers = {
@@ -62,9 +69,9 @@ class ListUsernamesPlugin extends Plugin {
           const chatType = chat.broadcast ? "📢 频道" : "👥 群组";
           const chatId = chat.id ? chat.id.toString() : "未知ID";
           
-          output += `<b>${index + 1}.</b> ${title} (${chatType})\n`;
-          output += `   👤 用户名: <code>${username}</code>\n`;
-          output += `   🆔 ID: <code>${chatId}</code>\n\n`;
+          output += `<b>${index + 1}.</b> ${title} (${htmlEscape(chatType)})\n`;
+          output += `   👤 用户名: ${codeTag(username)}\n`;
+          output += `   🆔 ID: ${codeTag(chatId)}\n\n`;
         });
 
         // 添加统计信息

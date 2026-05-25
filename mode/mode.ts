@@ -8,7 +8,7 @@
 import _ from "lodash";
 import { getPrefixes } from "@utils/pluginManager";
 import { Plugin } from "@utils/pluginBase";
-import { Api } from "telegram";
+import { Api } from "teleproto";
 import {
   createDirectoryInAssets,
 } from "@utils/pathHelpers";
@@ -22,6 +22,12 @@ const mainPrefix = prefixes[0];
 
 const pluginName = "mode";
 const commandName = `${mainPrefix}${pluginName}`;
+
+const htmlEscape = (text: string): string =>
+  String(text).replace(/[&<>"']/g, (m) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;",
+    '"': "&quot;", "'": "&#x27;",
+  }[m] || m));
 
 /* ===================== Help Menu ===================== */
 
@@ -112,6 +118,15 @@ class MessageModePlugin extends Plugin {
     this.initDB();
   }
 
+  cleanup(): void {
+    // 引用重置：清空实例级 db / cache / manager 引用，便于 reload 后重新初始化。
+    this.db = null;
+  }
+
+  async setup(): Promise<void> {
+    await this.initDB();
+  }
+
   /* ===================== 初始化数据库 ===================== */
 
   private async initDB() {
@@ -151,6 +166,7 @@ class MessageModePlugin extends Plugin {
 
   cmdHandlers: Record<string, (msg: Api.Message, trigger?: Api.Message) => Promise<void>> = {
     mode: async (msg: Api.Message) => {
+      if (!this.db) await this.initDB();
       const args = msg.message.split(/\s+/);
       const chatId = msg.peerId.toString();
 
@@ -234,7 +250,7 @@ class MessageModePlugin extends Plugin {
 
       case "list":
         await msg.edit({
-          text: `⚪ 白名单列表：\n<code>${list.join("\n") || "空"}</code>`,
+          text: `⚪ 白名单列表：\n<code>${htmlEscape(list.join("\n")) || "空"}</code>`,
           parseMode: "html",
         });
         return;
@@ -271,7 +287,7 @@ class MessageModePlugin extends Plugin {
 
       case "list":
         await msg.edit({
-          text: `⚫ 黑名单列表：\n<code>${list.join("\n") || "空"}</code>`,
+          text: `⚫ 黑名单列表：\n<code>${htmlEscape(list.join("\n")) || "空"}</code>`,
           parseMode: "html",
         });
         return;
@@ -314,6 +330,7 @@ class MessageModePlugin extends Plugin {
   /* ===================== 监听所有消息 ===================== */
 
   listenMessageHandler = async (msg: Api.Message) => {
+    if (!this.db) await this.initDB();
     const savedMessage = (msg as any).savedPeerId;
     if (!(msg.out || savedMessage)) return;
     if (!msg.text) return;

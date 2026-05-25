@@ -1,13 +1,18 @@
 // 文件名: plugins/gif.ts
 import { Plugin } from "@utils/pluginBase";
-import { getGlobalClient } from "@utils/globalClient";
+import { getGlobalClient, getCurrentGeneration } from "@utils/globalClient";
 import { getPrefixes } from "@utils/pluginManager";
 import { createDirectoryInAssets } from "@utils/pathHelpers";
-import { Api } from "telegram";
+import { Api } from "teleproto";
 import fs from "fs";
 import path from "path";
 import { exec } from "child_process";
 import { promisify } from "util";
+import { safeGetReplyMessage } from "@utils/safeGetMessages";
+
+const prefixes = getPrefixes();
+const mainPrefix = prefixes[0];
+
 
 const execAsync = promisify(exec);
 
@@ -79,10 +84,10 @@ class GifConverter {
     }
 
     // 获取回复的消息
-    const repliedMsg = await msg.getReplyMessage();
+    const repliedMsg = await safeGetReplyMessage(msg);
     if (!repliedMsg) {
       await msg.edit({
-        text: "❌ 请回复一个包含 GIF 或视频的消息后使用此命令。\n\n💡 使用 `.gif help` 查看帮助。"
+        text: "❌ 请回复一个包含 GIF 或视频的消息后使用此命令。\n\n💡 请回复 GIF 或视频后再试。"
       });
       return;
     }
@@ -100,7 +105,7 @@ class GifConverter {
     } catch (error: any) {
       console.error("GIF转贴纸失败:", error);
       await msg.edit({
-        text: `❌ 转换失败：${error.message}\n\n💡 使用 \`.gif help\` 查看支持的格式和限制。`
+        text: `❌ 转换失败：${error.message}\n\n💡 请检查支持的格式和限制。`
       });
     }
   }
@@ -231,10 +236,14 @@ class GifConverter {
       await this.sendAsSticker(msg, outputFile);
       await statusMsg?.edit({ text: "✅ 贴纸转换完成！" });
       
-      // 延迟删除状态消息
-      setTimeout(() => {
+      // 延迟删除状态消息 (generation-safe)
+      const gen1 = getCurrentGeneration();
+      const t1 = setTimeout(() => {
+        pendingTimers.delete(t1);
+        if (getCurrentGeneration() !== gen1) return;
         statusMsg?.delete().catch(() => {});
       }, 2000);
+      pendingTimers.add(t1);
 
     } finally {
       // 清理临时文件
@@ -375,10 +384,14 @@ class GifConverter {
         text: "✅ 成功！贴纸已自动添加到贴纸包并发送。" 
       });
       
-      // 延迟删除状态消息
-      setTimeout(() => {
+      // 延迟删除状态消息 (generation-safe)
+      const gen2 = getCurrentGeneration();
+      const t2 = setTimeout(() => {
+        pendingTimers.delete(t2);
+        if (getCurrentGeneration() !== gen2) return;
         statusMsg.delete().catch(() => {});
       }, 3000);
+      pendingTimers.add(t2);
       
     } catch (error: any) {
       console.error("自动添加贴纸包失败:", error);
@@ -388,9 +401,13 @@ class GifConverter {
       
       // 失败后直接发送贴纸
       await this.sendAsSticker(originalMsg, stickerFile);
-      setTimeout(() => {
+      const gen3 = getCurrentGeneration();
+      const t3 = setTimeout(() => {
+        pendingTimers.delete(t3);
+        if (getCurrentGeneration() !== gen3) return;
         statusMsg.delete().catch(() => {});
       }, 5000);
+      pendingTimers.add(t3);
     }
   }
   
@@ -456,7 +473,11 @@ const gif = async (msg: Api.Message) => {
   await converter.handle(msg);
 };
 
+// Track pending setTimeout handles for safe cleanup on reload
+const pendingTimers = new Set<ReturnType<typeof setTimeout>>();
+
 class GifStickerPlugin extends Plugin {
+
   description: string = `GIF 和视频转贴纸插件
 
 **功能特性：**
@@ -467,7 +488,7 @@ class GifStickerPlugin extends Plugin {
 
 **使用方法：**
 1. 回复包含 GIF 或视频的消息
-2. 发送 \`.gif\` 命令
+2. 发送 <code>${mainPrefix}gif</code> 命令
 3. 插件会自动转换并添加到贴纸包
 
 **支持格式：**
@@ -486,7 +507,6 @@ class GifStickerPlugin extends Plugin {
 • 失败时回退到直接发送
 
 **其他命令：**
-• \`.gif help\` - 查看详细帮助
 • \`.gif clear\` - 清理临时文件
 
 **依赖要求：**
@@ -501,6 +521,13 @@ class GifStickerPlugin extends Plugin {
   cmdHandlers: Record<string, (msg: Api.Message) => Promise<void>> = {
     gif,
   };
+
+  cleanup(): void {
+    for (const timer of pendingTimers) {
+      clearTimeout(timer);
+    }
+    pendingTimers.clear();
+  }
 }
 
 export default new GifStickerPlugin();

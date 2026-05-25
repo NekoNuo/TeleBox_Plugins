@@ -1,5 +1,5 @@
 import { Plugin } from "@utils/pluginBase";
-import { Api, TelegramClient } from "telegram";
+import { Api, TelegramClient } from "teleproto";
 import { getGlobalClient } from "@utils/globalClient";
 import { getPrefixes } from "@utils/pluginManager";
 import { createDirectoryInAssets } from "@utils/pathHelpers";
@@ -516,13 +516,13 @@ function getHelpText(): string {
   return `<b>🧹 群成员清理工具 Pro</b>
 
 <b>🔧 使用格式:</b>
-<code>${mainPrefix}clean_member &lt;模式&gt; &lt;参数&gt; [chat:-100xxx] [limit:数量] [search]</code>
+<code>${mainPrefix}clean_member ＜模式＞ ＜参数＞ [chat:-100xxx] [limit:数量] [search]</code>
 
 <b>📋 清理模式:</b>
 ┌─────────────────────────
-│ <b>1</b> &lt;天数&gt; → 未上线超过N天
-│ <b>2</b> &lt;天数&gt; → 未发言超过N天  
-│ <b>3</b> &lt;数量&gt; → 发言少于N条
+│ <b>1</b> ＜天数＞ → 未上线超过N天
+│ <b>2</b> ＜天数＞ → 未发言超过N天  
+│ <b>3</b> ＜数量＞ → 发言少于N条
 │ <b>4</b> → 已注销账户
 │ <b>5</b> → 所有普通成员 ⚠️
 └─────────────────────────
@@ -560,7 +560,6 @@ const clean_member = async (msg: Api.Message) => {
   const mode = (args[0] || "").toLowerCase();
   if (!mode) {
     await msg.edit({
-      text: `❌ <b>参数不足</b>\n\n💡 使用 <code>${mainPrefix}clean_member help</code> 查看帮助`,
       parseMode: "html"
     });
     return;
@@ -639,7 +638,6 @@ const clean_member = async (msg: Api.Message) => {
     day = 0;
   } else {
     await msg.edit({
-      text: `❌ <b>无效模式</b>\n\n请输入1-5之间的数字\n💡 使用 <code>${mainPrefix}clean_member help</code> 查看帮助`,
       parseMode: "html",
     });
     return;
@@ -896,6 +894,7 @@ const clean_member = async (msg: Api.Message) => {
 };
 
 class CleanMemberPlugin extends Plugin {
+
   description: string = getHelpText();
   cmdHandlers: Record<string, (msg: Api.Message) => Promise<void>> = {
     clean_member

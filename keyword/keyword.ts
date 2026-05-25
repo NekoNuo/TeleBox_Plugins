@@ -1,7 +1,7 @@
 import { Plugin } from "@utils/pluginBase";
-import { Api } from "telegram";
+import { Api } from "teleproto";
 import { getGlobalClient } from "@utils/globalClient";
-import { TelegramClient } from "telegram";
+import { TelegramClient } from "teleproto";
 import { createDirectoryInAssets } from "@utils/pathHelpers";
 import path from "path";
 import Database from "better-sqlite3";
@@ -84,12 +84,12 @@ class KeywordTask {
   }
 
   exportStr(showAll: boolean = false): string {
-    let text = `<code>${this.task_id}</code> - `;
-    text += `<code>${this.key}</code> - `;
+    let text = `${codeTag(this.task_id ?? "")}`;
+    text += ` - ${codeTag(this.key)} - `;
     if (showAll) {
-      text += `<code>${this.cid}</code> - `;
+      text += `${codeTag(this.cid)} - `;
     }
-    text += `${this.msg}`;
+    text += `${htmlEscape(this.msg)}`;
     return text;
   }
 
@@ -134,13 +134,14 @@ class KeywordTask {
 
     if (message.fromId && "userId" in message.fromId) {
       const userId = Number(message.fromId.userId);
-      const firstName = "User";
+      const sender = message.sender as any;
+      const firstName = sender?.firstName || sender?.first_name || "User";
       text = text.replace(
         "$mention",
-        `<a href="tg://user?id=${userId}">${firstName}</a>`
+        `<a href="tg://user?id=${userId}">${htmlEscape(firstName)}</a>`
       );
       text = text.replace("$code_id", String(userId));
-      text = text.replace("$code_name", firstName);
+      text = text.replace("$code_name", htmlEscape(firstName));
     } else {
       text = text.replace("$mention", "");
       text = text.replace("$code_id", "");
@@ -185,7 +186,8 @@ class KeywordTask {
       if (this.delete) {
         try {
           if (this.source_delay_delete > 0) {
-            setTimeout(async () => {
+            const sourceTimer = setTimeout(async () => {
+              pendingDeleteTimers.delete(sourceTimer);
               try {
                 await client.deleteMessages(message.peerId, [message.id], {
                   revoke: true,
@@ -194,6 +196,7 @@ class KeywordTask {
                 console.error("Delayed delete message error:", error);
               }
             }, this.source_delay_delete * 1000);
+            pendingDeleteTimers.add(sourceTimer);
           } else {
             await client.deleteMessages(message.peerId, [message.id], {
               revoke: true,
@@ -205,7 +208,8 @@ class KeywordTask {
       }
 
       if (this.delay_delete > 0 && sentMsg) {
-        setTimeout(async () => {
+        const replyTimer = setTimeout(async () => {
+          pendingDeleteTimers.delete(replyTimer);
           try {
             await client.deleteMessages(message.peerId, [sentMsg!.id], {
               revoke: true,
@@ -214,6 +218,7 @@ class KeywordTask {
             console.error("Delayed delete reply error:", error);
           }
         }, this.delay_delete * 1000);
+        pendingDeleteTimers.add(replyTimer);
       }
     } catch (error) {
       console.error("Process keyword error:", error);
@@ -335,6 +340,13 @@ function htmlEscape(text: string): string {
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#x27;");
 }
+
+function codeTag(text: string | number): string {
+  return `<code>${htmlEscape(String(text))}</code>`;
+}
+
+// 跟踪延迟删除定时器，确保 reload 时可以清理
+const pendingDeleteTimers = new Set<ReturnType<typeof setTimeout>>();
 
 class KeywordAlias {
   add(fromCid: number, toCid: number): void {
@@ -584,7 +596,7 @@ const keyword = async (msg: Api.Message) => {
 <code>keyword alias</code> - 查看当前群组继承设置
 <code>keyword alias 123456</code> - 设置继承其他群组的关键词
 <code>keyword alias rm</code> - 删除继承设置
-<code>keyword help</code> - 显示此帮助信息
+
 
 <b>📝 添加关键词任务格式：</b>
 <code>keyword 关键词内容
@@ -823,7 +835,23 @@ reply delete ban3600</code>
 };
 
 class KeywordPlugin extends Plugin {
-  description: string = `关键词回复管理 .keyword h 查看帮助`;
+  cleanup(): void {
+    for (const timer of pendingDeleteTimers) {
+      clearTimeout(timer);
+    }
+    pendingDeleteTimers.clear();
+    try {
+      if (db && typeof db.close === "function") {
+        db.close();
+        db = null as any;
+      }
+    } catch (error) {
+      console.error("Failed to close keyword DB:", error);
+      db = null as any;
+    }
+  }
+
+  description: string = `关键词回复管理`;
   cmdHandlers: Record<string, (msg: Api.Message) => Promise<void>> = {
     keyword,
   };

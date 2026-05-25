@@ -1,10 +1,16 @@
 import { Plugin } from "@utils/pluginBase";
-import { Api } from "telegram";
+import { getPrefixes } from "@utils/pluginManager";
+import { Api } from "teleproto";
 import { getGlobalClient } from "@utils/globalClient";
 import axios from "axios";
 import * as yaml from "js-yaml";
 import * as cheerio from "cheerio";
 import dayjs from "dayjs";
+import { safeGetReplyMessage } from "@utils/safeGetMessages";
+
+const prefixes = getPrefixes();
+const mainPrefix = prefixes[0];
+
 
 // --- 静态配置 ---
 
@@ -70,6 +76,9 @@ function htmlEscape(text: string): string {
     '"': '&quot;', "'": '&#x27;'
   }[m] || m));
 }
+
+const isHttpUrl = (text: string): boolean => /^https?:\/\//i.test(text);
+const formatRawUrl = (url: string, isTxtOutput: boolean): string => isTxtOutput ? url : htmlEscape(url);
 
 // Markdown特殊字符转义 (用于TXT输出)
 function markdownEscape(text: string): string {
@@ -286,14 +295,15 @@ async function getWebsiteInfo(url: string): Promise<{ website: string | null; we
 }
 
 class SubinfoPlugin extends Plugin {
+
   description =
     `📈 <b>订阅链接多维度查询工具</b>
 
 <b>使用方法：</b>
-• <code>.subinfo [链接]</code> - 详细查询
-• <code>.subinfo txt [链接]</code> - 详细查询，以TXT文件输出
-• <code>.cha [链接]</code> - 简洁查询
-• <code>.cha txt [链接]</code> - 简洁查询，以TXT文件输出
+• <code>${mainPrefix}subinfo [链接]</code> - 详细查询
+• <code>${mainPrefix}subinfo txt [链接]</code> - 详细查询，以TXT文件输出
+• <code>${mainPrefix}cha [链接]</code> - 简洁查询
+• <code>${mainPrefix}cha txt [链接]</code> - 简洁查询，以TXT文件输出
 • <b>你也可以使用以上命令回复某条包含订阅链接的消息进行查询</b>
 
 <b>功能特性：</b>
@@ -471,7 +481,7 @@ class SubinfoPlugin extends Plugin {
     let sourceText = '';
     if (msg.replyToMsgId) {
       try {
-        const replyMsg = await msg.getReplyMessage();
+        const replyMsg = await safeGetReplyMessage(msg);
         if (replyMsg) sourceText = (replyMsg.text ?? '') + ' ' + ((replyMsg as any).caption ?? '');
       } catch { /* 忽略 */ }
     }
@@ -508,13 +518,13 @@ class SubinfoPlugin extends Plugin {
 
       if (!result.success && result.errorMessage === "无流量统计信息") {
           let output = `订阅链接: ${codeTag(url)}\n机场名称: ${codeTag(result.configName)}\n**无流量统计信息**`;
-          if (result.websiteInfo.website) output += `\n🔗 官网链接: ${result.websiteInfo.website}`;
+          if (result.websiteInfo.website) output += `\n🔗 官网链接: ${formatRawUrl(result.websiteInfo.website, isTxtOutput)}`;
           reports.push(output); stats.失败++; continue;
       }
       
       if (!result.success) {
         let errorMsg = `${boldTag('查询失败:')} ${codeTag(result.errorMessage || '未知错误')}`;
-        if (result.websiteInfo.website) errorMsg += `\n🔗 官网链接: ${result.websiteInfo.website}`;
+        if (result.websiteInfo.website) errorMsg += `\n🔗 官网链接: ${formatRawUrl(result.websiteInfo.website, isTxtOutput)}`;
         let output = `订阅链接: ${codeTag(url)}\n${errorMsg}`;
         reports.push(output); stats.失败++; continue;
       }
@@ -535,7 +545,7 @@ class SubinfoPlugin extends Plugin {
       seg.push(`📄 ${boldTag('机场名称')}: ${codeTag(configName)}`);
       
       const finalProfileUrl = profileUrl || websiteInfo.website;
-      if (finalProfileUrl) seg.push(`🔗 ${boldTag('官网链接')}: ${finalProfileUrl}`);
+      if (finalProfileUrl && isHttpUrl(finalProfileUrl)) seg.push(`🔗 ${boldTag('官网链接')}: ${formatRawUrl(finalProfileUrl, isTxtOutput)}`);
       seg.push(`🏷️ ${boldTag('订阅链接')}: ${codeTag(url)}`);
       
       seg.push(`⏱️ ${boldTag('查询时间')}: ${codeTag(dayjs().format('YYYY-MM-DD HH:mm:ss'))}`);
@@ -609,13 +619,17 @@ class SubinfoPlugin extends Plugin {
         const dateStr = dayjs().format('YYYYMMDD_HHmmss');
         const fileName = `subinfo_report_${dateStr}.txt`;
         const fileContent = resultText;
-        const fileBuffer = Buffer.from(fileContent, 'utf-8');
+        const fileBuffer = Buffer.from(fileContent, 'utf-8') as Buffer & { name?: string };
+        fileBuffer.name = fileName;
         
         try {
-            await client.sendFile(msg.chatId!, { file: fileBuffer, fileName: fileName, caption: `✅ 订阅查询报告 (共 ${urls.length} 个链接)\n${statsText.trim()}` });
+            await client.sendFile(msg.chatId!, { file: fileBuffer, caption: `✅ 订阅查询报告 (共 ${urls.length} 个链接)\n${statsText.trim()}` });
             await msg.delete();
         } catch (e) {
-            await msg.edit({ text: `❌ 发送TXT文件失败，请检查权限。\n\n部分内容：\n${splitLongMessage(resultText, 1024)[0]}`, parseMode: 'html' });
+              const preview = isTxtOutput
+                ? splitLongMessage(resultText, 1024)[0]
+                : htmlEscape(splitLongMessage(resultText, 1024)[0]);
+              await msg.edit({ text: `❌ 发送TXT文件失败，请检查权限。\n\n部分内容：\n${preview}`, parseMode: 'html' });
         }
     } else {
         const messageParts = splitLongMessage(resultText, 4090);
@@ -640,7 +654,7 @@ class SubinfoPlugin extends Plugin {
     let sourceText = '';
     if (msg.replyToMsgId) {
       try {
-        const replyMsg = await msg.getReplyMessage();
+        const replyMsg = await safeGetReplyMessage(msg);
         if (replyMsg) sourceText = (replyMsg.text ?? '') + ' ' + ((replyMsg as any).caption ?? '');
       } catch { /* 忽略 */ }
     }
@@ -652,9 +666,9 @@ class SubinfoPlugin extends Plugin {
        await msg.edit({
         text: "❌ <b>无效的参数</b>\n\n" + 
               "💡 使用方法：\n" +
-              "• <code>.cha [订阅链接]</code> - 查询订阅链接\n" +
-              "• <code>.cha txt [订阅链接]</code> - **以TXT文件输出**\n" +
-              "• 回复包含链接的消息并发送 <code>.cha</code> 或 <code>.cha txt</code>",
+              "• <code>${mainPrefix}cha [订阅链接]</code> - 查询订阅链接\n" +
+              "• <code>${mainPrefix}cha txt [订阅链接]</code> - **以TXT文件输出**\n" +
+              "• 回复包含链接的消息并发送 <code>${mainPrefix}cha</code> 或 <code>${mainPrefix}cha txt</code>",
         parseMode: "html"
        });
        return;
@@ -686,10 +700,10 @@ class SubinfoPlugin extends Plugin {
             if (errorMsg === "无流量统计信息") {
                  outputText = `${boldTag('订阅链接')}：${codeTag(url)}\n` +
                               `${boldTag('机场名称')}：${codeTag(result.configName)}\n` +
-                              `**无流量信息**`;
+                              `${boldTag('无流量信息')}`;
             } else {
                  outputText = `${boldTag('订阅链接')}：${codeTag(url)}\n` +
-                              `**查询失败**: ${format(errorMsg)}`;
+                              `${boldTag('查询失败')}: ${format(errorMsg)}`;
             }
         } else {
             const { configName, profileUrl, used, upload, download, total, remain, expireTs } = result;
@@ -697,7 +711,7 @@ class SubinfoPlugin extends Plugin {
             outputText = `${boldTag('机场名称')}：${codeTag(configName)}\n`;
             
             const finalProfileUrl = profileUrl || result.websiteInfo.website;
-            if (finalProfileUrl) outputText += `${boldTag('官网链接')}：${finalProfileUrl}\n`;
+            if (finalProfileUrl && isHttpUrl(finalProfileUrl)) outputText += `${boldTag('官网链接')}：${formatRawUrl(finalProfileUrl, isTxtOutput)}\n`;
 
             outputText += `${boldTag('订阅链接')}：${codeTag(url)}\n` +
                           `\n` +
@@ -737,13 +751,17 @@ class SubinfoPlugin extends Plugin {
         const dateStr = dayjs().format('YYYYMMDD_HHmmss');
         const fileName = `cha_report_${dateStr}.txt`;
         const fileContent = finalOutput || "未获取到任何信息";
-        const fileBuffer = Buffer.from(fileContent, 'utf-8');
+        const fileBuffer = Buffer.from(fileContent, 'utf-8') as Buffer & { name?: string };
+        fileBuffer.name = fileName;
         
         try {
-            await client.sendFile(msg.chatId!, { file: fileBuffer, fileName: fileName, caption: `✅ 简洁订阅查询报告 (共 ${urls.length} 个链接)` });
+            await client.sendFile(msg.chatId!, { file: fileBuffer, caption: `✅ 简洁订阅查询报告 (共 ${urls.length} 个链接)` });
             await msg.delete(); 
         } catch (e) {
-            await msg.edit({ text: `❌ 发送TXT文件失败，请检查权限。\n\n部分内容：\n${splitLongMessage(finalOutput, 1024)[0]}`, parseMode: 'html' });
+              const preview = isTxtOutput
+                ? splitLongMessage(finalOutput, 1024)[0]
+                : htmlEscape(splitLongMessage(finalOutput, 1024)[0]);
+              await msg.edit({ text: `❌ 发送TXT文件失败，请检查权限。\n\n部分内容：\n${preview}`, parseMode: 'html' });
         }
     } else {
         const messageParts = splitLongMessage(finalOutput || "未获取到任何信息", 4090);

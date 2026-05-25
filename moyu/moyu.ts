@@ -1,7 +1,7 @@
 import { Plugin } from "@utils/pluginBase";
-import { Api, client, TelegramClient } from "telegram";
+import { Api, client, TelegramClient } from "teleproto";
 import axios from "axios";
-import { CustomFile } from "telegram/client/uploads.js";
+import { CustomFile } from "teleproto/client/uploads.js";
 
 const url = "https://api.52vmy.cn/api/wl/moyu";
 
@@ -12,6 +12,7 @@ function formatCN(date: Date): string {
 }
 
 class MoyuPlugin extends Plugin {
+
   description: string = "摸鱼日报";
   cmdHandlers: Record<string, (msg: Api.Message) => Promise<void>> = {
     moyu: async (msg) => {

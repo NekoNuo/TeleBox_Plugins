@@ -1,6 +1,6 @@
 import { getPrefixes } from "@utils/pluginManager";
 import { Plugin } from "@utils/pluginBase";
-import { Api } from "telegram";
+import { Api } from "teleproto";
 import { getGlobalClient } from "@utils/globalClient";
 import axios from "axios";
 
@@ -27,7 +27,7 @@ const help_text = `🗞️ <b>每日新闻插件</b>
 
 <b>🔧 使用方法:</b>
 • <code>${mainPrefix}news</code> - 获取完整的每日资讯
-• <code>${mainPrefix}news help</code> - 显示此帮助信息
+
 
 <b>💡 示例:</b>
 • <code>${mainPrefix}news</code> - 获取今日完整资讯包
@@ -75,6 +75,7 @@ interface NewsResponse {
 }
 
 class NewsPlugin extends Plugin {
+
   description: string = `🔧 <b>NEWS</b>
 
 <b>📝 功能描述:</b>
@@ -121,7 +122,7 @@ class NewsPlugin extends Plugin {
 
         // 未知子命令
         await msg.edit({
-          text: `❌ <b>未知命令:</b> <code>${htmlEscape(sub)}</code>\n\n💡 使用 <code>${mainPrefix}news help</code> 查看帮助`,
+          text: `❌ <b>未知命令:</b> <code>${htmlEscape(sub)}</code>`,
           parseMode: "html"
         });
 
@@ -171,9 +172,9 @@ class NewsPlugin extends Plugin {
         messageParts.push("");
         data.newsList.forEach((item, index) => {
           const title = htmlEscape(item.title || "");
-          const url = item.url || ""; // URL不需要HTML转义
-          if (title && url) {
-            messageParts.push(`${index + 1}. <a href="${url}">${title}</a>`);
+          const url = item.url || "";
+          if (title && /^https?:\/\//i.test(url)) {
+            messageParts.push(`${index + 1}. <a href="${htmlEscape(url)}">${title}</a>`);
           }
         });
         messageParts.push("");

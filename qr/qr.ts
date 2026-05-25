@@ -1,13 +1,14 @@
 import { Plugin } from "@utils/pluginBase";
 import { getGlobalClient } from "@utils/globalClient";
-import { Api } from "telegram";
+import { Api } from "teleproto";
 import { Buffer } from "buffer";
 import { exec } from "child_process";
 import { promisify } from "util";
 import { writeFileSync, readFileSync, unlinkSync, existsSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
-import { CustomFile } from "telegram/client/uploads";
+import { CustomFile } from "teleproto/client/uploads";
+import { safeGetReplyMessage } from "@utils/safeGetMessages";
 
 const execAsync = promisify(exec);
 
@@ -183,6 +184,7 @@ async function decodeQRCode(imageBuffer: Buffer): Promise<string[]> {
 }
 
 class QRPlugin extends Plugin {
+
   description: string = `📱 QR 二维码插件
 从 Python 版本转换而来，支持二维码生成和解码功能。
 使用前请先安装依赖。
@@ -218,7 +220,7 @@ class QRPlugin extends Plugin {
       try {
         const args = msg.message.split(' ').slice(1);
         const textToEncode = args.join(' ');
-        const replied = msg.replyTo ? await msg.getReplyMessage() : null;
+        const replied = msg.replyTo ? await safeGetReplyMessage(msg) : null;
 
         // 1. 优先处理命令后的文本 (编码)
         if (textToEncode) {

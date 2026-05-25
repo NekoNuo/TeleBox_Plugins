@@ -13,11 +13,11 @@ import * as path from "path";
 import * as os from "os";
 
 import { Plugin } from "@utils/pluginBase";
-import { getGlobalClient } from "@utils/globalClient";
+import { getGlobalClient, getCurrentGeneration } from "@utils/globalClient";
 import { getPrefixes } from "@utils/pluginManager";
 
-import { Api } from "telegram";
-import { CustomFile } from "telegram/client/uploads";
+import { Api } from "teleproto";
+import { CustomFile } from "teleproto/client/uploads";
 
 // ==================== 工具函数与常量 ====================
 /** 获取命令前缀 */
@@ -237,7 +237,11 @@ const help_text = `🎬 <b>JavDB 番号查询</b>
 • 封面图自动添加剧透标记，60秒后自动销毁
 • 附带 JavDB 和 MissAV 在线观看链接`;
 
+// Track pending setTimeout handles for safe cleanup on reload
+const pendingTimers = new Set<ReturnType<typeof setTimeout>>();
+
 class JavDBPlugin extends Plugin {
+
   description: string = `JavDB 番号查询\n\n${help_text}`;
   cmdHandlers: Record<string, (msg: Api.Message) => Promise<void>> = {};
 
@@ -355,11 +359,15 @@ class JavDBPlugin extends Plugin {
         await sendLongMessage(msg, caption);
       }
 
-      // 定时销毁（60秒）
+      // 定时销毁（60秒）(generation-safe)
       if (sent) {
-        setTimeout(async () => {
+        const gen = getCurrentGeneration();
+        const t = setTimeout(async () => {
+          pendingTimers.delete(t);
+          if (getCurrentGeneration() !== gen) return;
           try { await client.deleteMessages(msg.peerId!, [sent!.id], { revoke: true }); } catch {}
         }, 60_000);
+        pendingTimers.add(t);
       }
     } catch (error: any) {
       // 错误处理
@@ -382,6 +390,13 @@ class JavDBPlugin extends Plugin {
       // 通用错误处理
       await msg.edit({ text: `❌ <b>查询失败：</b>${htmlEscape(m)}`, parseMode: "html" });
     }
+  }
+
+  cleanup(): void {
+    for (const timer of pendingTimers) {
+      clearTimeout(timer);
+    }
+    pendingTimers.clear();
   }
 }
 

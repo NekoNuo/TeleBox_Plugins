@@ -1,7 +1,7 @@
 import { Plugin } from "@utils/pluginBase";
 import { getGlobalClient } from "@utils/globalClient";
 import { getPrefixes } from "@utils/pluginManager";
-import { Api } from "telegram";
+import { Api } from "teleproto";
 
 // HTML转义函数
 const htmlEscape = (text: string): string => 
@@ -182,6 +182,7 @@ const help_text = `🍗 <b>疯狂星期四插件</b>
 • <code>${mainPrefix}crazy4</code> - 随机发送一条疯狂星期四文案`;
 
 class Crazy4Plugin extends Plugin {
+
   description: string = `疯狂星期四文案插件\n\n${help_text}`;
   
   cmdHandlers = {

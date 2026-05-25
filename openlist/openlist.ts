@@ -1,6 +1,6 @@
 import { Plugin } from "@utils/pluginBase";
 import { getPrefixes } from "@utils/pluginManager";
-import { Api } from "telegram";
+import { Api } from "teleproto";
 import { getGlobalClient } from "@utils/globalClient";
 import * as fs from "fs/promises";
 import * as path from "path";
@@ -10,6 +10,7 @@ import { createDirectoryInAssets } from "@utils/pathHelpers";
 
 import { exec } from "child_process";
 import { promisify } from "util";
+import { safeGetReplyMessage } from "@utils/safeGetMessages";
 
 const prefixes = getPrefixes();
 const mainPrefix = prefixes[0];
@@ -18,6 +19,18 @@ const commandName = `${mainPrefix}${pluginName}`;
 
 const execAsync = promisify(exec);
 const GH_BASE_DOWNLOAD = "https://github.com/OpenListTeam/OpenList/releases/latest/download";
+
+const htmlEscape = (text: unknown): string =>
+  String(text ?? "").replace(/[&<>"']/g, (m) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#x27;",
+  }[m] || m));
+
+const codeTag = (text: unknown): string => `<code>${htmlEscape(text)}</code>`;
+const preTag = (text: unknown): string => `<pre>${htmlEscape(text)}</pre>`;
 
 const helpText = `⚙️ <b>OpenList 管理插件</b>
 
@@ -51,6 +64,7 @@ const helpText = `⚙️ <b>OpenList 管理插件</b>
 `;
 
 class OpenListPlugin extends Plugin {
+
   description: string = `\nOpenList 管理\n\n${helpText}`;
   cmdHandlers: Record<string, (msg: Api.Message) => Promise<void>> = {
     openlist: async (msg: Api.Message) => {
@@ -177,11 +191,11 @@ class OpenListPlugin extends Plugin {
       const installPath = this.normalizeInstallPath(installBase);
 
       if (await this.fileExists(`${installPath}/openlist`)) {
-        await msg.edit({ text: `检测到已安装于：${installPath}\n请使用：${commandName} update` });
+        await msg.edit({ text: `检测到已安装于：${codeTag(installPath)}\n请使用：${codeTag(`${commandName} update`)}`, parseMode: "html" });
         return;
       }
 
-      await msg.edit({ text: `开始安装到：${installPath}` });
+      await msg.edit({ text: `开始安装到：${codeTag(installPath)}`, parseMode: "html" });
       await execAsync(`mkdir -p "${installPath}"`);
 
       const tarPath = "/tmp/openlist.tar.gz";
@@ -246,14 +260,14 @@ class OpenListPlugin extends Plugin {
       lines.push("安装完成");
       if (version) lines.push(`版本: ${version}`);
       lines.push(`目录: ${installPath}`);
-      lines.push(`访问: http://${ip || "<服务器IP>"}:5244/`);
+      lines.push(`访问: http://${ip || "服务器IP"}:5244/`);
       if (username && password) {
         lines.push(`账号: ${username}`);
         lines.push(`密码: ${password}`);
       }
       await msg.edit({ text: lines.join("\n") });
     } catch (error: any) {
-      await msg.edit({ text: `安装失败: ${error?.message || error}` });
+      await msg.edit({ text: `安装失败: ${htmlEscape(error?.message || error)}`, parseMode: "html" });
     }
   }
 
@@ -341,7 +355,7 @@ class OpenListPlugin extends Plugin {
     try {
       const installPath = await this.detectInstalledPath();
       if (!(await this.dirExists(`${installPath}/data`))) {
-        await msg.edit({ text: `未找到配置目录：${installPath}/data` });
+        await msg.edit({ text: `未找到配置目录：${codeTag(`${installPath}/data`)}`, parseMode: "html" });
         return;
       }
 
@@ -353,9 +367,9 @@ class OpenListPlugin extends Plugin {
       await execAsync(`mkdir -p "${backupDir}"`);
       await execAsync(`cp -r "${installPath}/data" "${backupDir}/"`);
 
-      await msg.edit({ text: `备份成功\n目录: ${backupDir}` });
+      await msg.edit({ text: `备份成功\n目录: ${codeTag(backupDir)}`, parseMode: "html" });
     } catch (error: any) {
-      await msg.edit({ text: `备份失败: ${error?.message || error}` });
+      await msg.edit({ text: `备份失败: ${htmlEscape(error?.message || error)}`, parseMode: "html" });
     }
   }
 
@@ -373,25 +387,25 @@ class OpenListPlugin extends Plugin {
         );
         const latest = (latestOut || "").trim();
         if (!latest) {
-          await msg.edit({ text: `未找到任何备份于：${backupBaseDir}` });
+          await msg.edit({ text: `未找到任何备份于：${codeTag(backupBaseDir)}`, parseMode: "html" });
           return;
         }
         targetBackupDir = `${backupBaseDir}/${latest}`;
       }
 
       if (!(await this.dirExists(`${targetBackupDir}/data`))) {
-        await msg.edit({ text: `无效的备份目录：${targetBackupDir}` });
+        await msg.edit({ text: `无效的备份目录：${codeTag(targetBackupDir)}`, parseMode: "html" });
         return;
       }
 
-      await msg.edit({ text: `将从 ${targetBackupDir} 恢复...` });
+      await msg.edit({ text: `将从 ${codeTag(targetBackupDir)} 恢复...`, parseMode: "html" });
       await execAsync(`systemctl stop openlist || true`);
       await execAsync(`cp -r "${targetBackupDir}/data" "${installPath}/"`);
       await execAsync(`systemctl start openlist`);
 
       await msg.edit({ text: "恢复成功" });
     } catch (error: any) {
-      await msg.edit({ text: `恢复失败: ${error?.message || error}` });
+      await msg.edit({ text: `恢复失败: ${htmlEscape(error?.message || error)}`, parseMode: "html" });
     }
   }
 
@@ -452,12 +466,12 @@ class OpenListPlugin extends Plugin {
       // 更新本地凭证
       if (newUser || newPass) {
         await this.updateStoredCredentials(newUser, newPass);
-        await msg.edit({ text: `执行结果:\n\n<pre>${(stdout || "").trim()}</pre>\n\n✅ 凭证已同步更新`, parseMode: "html" });
+        await msg.edit({ text: `执行结果:\n\n${preTag((stdout || "").trim())}\n\n✅ 凭证已同步更新`, parseMode: "html" });
       } else {
-        await msg.edit({ text: `执行结果:\n\n<pre>${(stdout || "").trim()}</pre>`, parseMode: "html" });
+        await msg.edit({ text: `执行结果:\n\n${preTag((stdout || "").trim())}`, parseMode: "html" });
       }
     } catch (error: any) {
-      await msg.edit({ text: `管理命令失败: ${error?.message || error}` });
+      await msg.edit({ text: `管理命令失败: ${htmlEscape(error?.message || error)}`, parseMode: "html" });
     }
   }
 
@@ -483,7 +497,7 @@ class OpenListPlugin extends Plugin {
     await db.update((data) => {
       data.defaultPath = path;
     });
-    await msg.edit({ text: `✅ 默认上传路径已设置为: ${path}\n\n现在使用 ${commandName} save 时若不指定路径，将默认上传到此位置。` });
+    await msg.edit({ text: `✅ 默认上传路径已设置为: ${codeTag(path)}\n\n现在使用 ${codeTag(`${commandName} save`)} 时若不指定路径，将默认上传到此位置。`, parseMode: "html" });
   }
 
   private async updateStoredCredentials(user?: string, pass?: string) {
@@ -530,7 +544,7 @@ class OpenListPlugin extends Plugin {
 
   private async handleSave(msg: Api.Message, targetPath?: string) {
     try {
-      const replyToMsg = await msg.getReplyMessage();
+      const replyToMsg = await safeGetReplyMessage(msg);
       if (!replyToMsg || !replyToMsg.media) {
         await msg.edit({ text: "请回复一个文件、图片或视频来保存。" });
         return;
@@ -583,7 +597,7 @@ class OpenListPlugin extends Plugin {
         fileName = `media_${Date.now()}`;
       }
 
-      await msg.edit({ text: `正在下载: ${fileName}` });
+      await msg.edit({ text: `正在下载: ${htmlEscape(fileName)}`, parseMode: "html" });
 
       const client = await getGlobalClient();
       const buffer = await client.downloadMedia(replyToMsg.media);
@@ -600,10 +614,10 @@ class OpenListPlugin extends Plugin {
         await fs.mkdir(saveDir, { recursive: true });
         const savePath = path.join(saveDir, fileName);
         await fs.writeFile(savePath, buffer);
-        await msg.edit({ text: `文件已保存到: ${savePath}` });
+        await msg.edit({ text: `文件已保存到: ${codeTag(savePath)}`, parseMode: "html" });
       }
     } catch (error: any) {
-      await msg.edit({ text: `文件保存失败: ${error?.message || error}` });
+      await msg.edit({ text: `文件保存失败: ${htmlEscape(error?.message || error)}`, parseMode: "html" });
     }
   }
 
@@ -626,7 +640,7 @@ class OpenListPlugin extends Plugin {
       // 移除多余的斜杠
       fullPath = fullPath.replace(/\/+/g, "/");
 
-      await msg.edit({ text: `正在上传到: ${fullPath}` });
+      await msg.edit({ text: `正在上传到: ${codeTag(fullPath)}`, parseMode: "html" });
 
       const apiUrl = "http://127.0.0.1:5244/api/fs/put";
       
@@ -643,7 +657,7 @@ class OpenListPlugin extends Plugin {
         maxContentLength: Infinity
       });
 
-      await msg.edit({ text: `✅ 文件已上传到 OpenList: ${fullPath}` });
+      await msg.edit({ text: `✅ 文件已上传到 OpenList: ${codeTag(fullPath)}`, parseMode: "html" });
 
     } catch (error: any) {
       console.error("OpenList Upload Error:", error);
@@ -765,7 +779,8 @@ class OpenListPlugin extends Plugin {
       if (version) lines.push(`<b>版本:</b> ${version}`);
       lines.push(`<b>端口:</b> ${port}`);
       if (publicIp && port === "listen") {
-        lines.push(`<b>链接:</b> <a href="http://${publicIp}:5244/">http://${publicIp}:5244/</a>`);
+        const url = `http://${publicIp}:5244/`;
+        lines.push(`<b>链接:</b> <a href="${htmlEscape(url)}">${htmlEscape(url)}</a>`);
       }
 
       // 显示用户账户信息
@@ -777,7 +792,7 @@ class OpenListPlugin extends Plugin {
           if (config.users && config.users.length > 0) {
             lines.push("\n<b>账户信息:</b>");
             config.users.forEach((user: any, index: number) => {
-              lines.push(`${index + 1}. <b>用户:</b> ${user.username} | <b>密码:</b> ${user.password}`);
+              lines.push(`${index + 1}. <b>用户:</b> ${htmlEscape(user.username)} | <b>密码:</b> ${htmlEscape(user.password)}`);
             });
           }
         } catch (e) {
@@ -787,7 +802,7 @@ class OpenListPlugin extends Plugin {
 
       await msg.edit({ text: lines.join("\n"), parseMode: "html" });
     } catch (error: any) {
-      await msg.edit({ text: `状态获取失败: ${error?.message || error}` });
+      await msg.edit({ text: `状态获取失败: ${htmlEscape(error?.message || error)}`, parseMode: "html" });
     }
   }
 

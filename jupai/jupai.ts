@@ -1,9 +1,19 @@
 import axios from "axios";
 import { getPrefixes } from "@utils/pluginManager";
 import { Plugin } from "@utils/pluginBase";
-import { Api } from "telegram";
+import { Api } from "teleproto";
 import { getGlobalClient } from "@utils/globalClient";
-import { CustomFile } from "telegram/client/uploads.js";
+import { CustomFile } from "teleproto/client/uploads.js";
+import { safeGetReplyMessage } from "@utils/safeGetMessages";
+
+const htmlEscape = (text: string): string =>
+  text.replace(/[&<>"']/g, (m) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#x27;",
+  }[m] || m));
 
 const timeout = 60000;
 const prefixes = getPrefixes();
@@ -34,7 +44,7 @@ class JuPaiPlugin extends Plugin {
         
         // 如果命令后没有文本，检查是否回复了消息
         if (!text) {
-          const replied = msg.replyTo ? await msg.getReplyMessage() : null;
+          const replied = msg.replyTo ? await safeGetReplyMessage(msg) : null;
           if (replied && replied.message) {
             text = replied.message;
           }
@@ -85,12 +95,12 @@ class JuPaiPlugin extends Plugin {
           await msg.delete();
         } catch (error) {
           const errorMsg = error instanceof Error ? error.message : String(error);
-          await msg.edit({ text: `获取失败: ${errorMsg}` });
+          await msg.edit({ text: `获取失败: ${htmlEscape(errorMsg)}`, parseMode: "html" });
         }
       } catch (error) {
         console.error("JuPai Plugin Error:", error);
         const errorMsg = error instanceof Error ? error.message : String(error);
-        await msg.edit({ text: `插件执行失败: ${errorMsg}` });
+        await msg.edit({ text: `插件执行失败: ${htmlEscape(errorMsg)}`, parseMode: "html" });
       }
     },
   };

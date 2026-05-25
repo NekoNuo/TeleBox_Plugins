@@ -2,8 +2,8 @@ import { Plugin } from "@utils/pluginBase";
 import { getGlobalClient } from "@utils/globalClient";
 import { getPrefixes } from "@utils/pluginManager";
 import { createDirectoryInTemp, createDirectoryInAssets } from "@utils/pathHelpers";
-import { Api } from "telegram";
-import { CustomFile } from "telegram/client/uploads.js";
+import { Api } from "teleproto";
+import { CustomFile } from "teleproto/client/uploads.js";
 import { JSONFilePreset } from "lowdb/node";
 import * as fs from "fs";
 import * as path from "path";
@@ -151,6 +151,14 @@ class ConfigManager {
   private static initLock = false;  // 添加锁防止并发初始化
   private static configPath: string;
 
+  static cleanup(): void {
+    // 引用重置：清空实例级 db / cache / manager 引用，便于 reload 后重新初始化。
+    this.db = null;
+    this.initialized = false;
+    this.initLock = false;
+    this.configPath = "";
+  }
+
   private static async init(): Promise<void> {
     if (this.initialized) return;
     
@@ -253,7 +261,6 @@ const modifySSHConfig = async (
 const help_text = `🔐 <b>SSH管理插件</b>
 
 <b>密钥管理：</b>
-• <code>${mainPrefix}ssh</code> - 显示帮助信息
 • <code>${mainPrefix}ssh gen add</code> - 生成新密钥并追加到现有密钥
 • <code>${mainPrefix}ssh gen replace</code> - 生成新密钥并替换所有旧密钥
 • <code>${mainPrefix}ssh keys</code> - 查看当前授权的所有密钥
@@ -275,13 +282,21 @@ const help_text = `🔐 <b>SSH管理插件</b>
 • <code>${mainPrefix}ssh set @username</code> - 设置发送到指定用户
 • <code>${mainPrefix}ssh set me</code> - 重置为默认发送到收藏夹
 • <code>${mainPrefix}ssh info</code> - 查看SSH状态和配置
-• <code>${mainPrefix}ssh help</code> - 显示此帮助
 
 <b>示例：</b>
 <code>${mainPrefix}ssh gen replace</code> - 生成新密钥并清空旧密钥
 <code>${mainPrefix}ssh keys export</code> - 导出所有密钥到文件`;
 
 class SSHPlugin extends Plugin {
+  cleanup(): void {
+    ConfigManager.cleanup();
+  }
+
+  async setup(): Promise<void> {
+    // Re-initialize ConfigManager after cleanup/reload
+    await ConfigManager.get(CONFIG_KEYS.TARGET_CHAT);
+  }
+
   description: string = `SSH管理和服务器配置\n\n${help_text}`;
 
   cmdHandlers = {
@@ -317,7 +332,7 @@ class SSHPlugin extends Plugin {
     
     if (!canExecute) {
       await msg.edit({
-        text: "🔒 <b>权限限制</b>\n\n此SSH管理插件只能在以下位置执行：\n• 收藏夹\n• 已设置的目标会话\n\n💡 当前目标: <code>" + (targetChat === "me" ? "收藏夹" : targetChat) + "</code>\n⚠️ 请在允许的位置使用此插件",
+        text: "🔒 <b>权限限制</b>\n\n此SSH管理插件只能在以下位置执行：\n• 收藏夹\n• 已设置的目标会话\n\n💡 当前目标: <code>" + htmlEscape(targetChat === "me" ? "收藏夹" : targetChat) + "</code>\n⚠️ 请在允许的位置使用此插件",
         parseMode: "html"
       });
       return;
@@ -414,7 +429,6 @@ class SSHPlugin extends Plugin {
 
         default:
           await msg.edit({
-            text: `❌ <b>未知命令:</b> <code>${htmlEscape(sub)}</code>\n\n💡 使用 <code>${mainPrefix}ssh help</code> 查看帮助`,
             parseMode: "html"
           });
       }
@@ -613,7 +627,7 @@ class SSHPlugin extends Plugin {
       }
       
       await msg.edit({
-        text: `✅ <b>SSH密钥生成成功</b>\n\n📁 密钥包已发送到: ${targetChat === "me" ? "收藏夹" : htmlEscape(targetChat)}\n🔑 公钥${modeText}\n📊 当前共有 ${keyCount} 个授权密钥\n\n<b>服务器信息：</b>\n🖥️ 主机: ${hostname}\n🌐 IP: ${ipAddress}\n🔌 端口: ${sshPort}\n\n<b>连接命令：</b>\n<code>ssh -i ${keyName} root@${ipAddress} -p ${sshPort}</code>${setupMessage}\n\n💡 <b>提示：</b>\n• 请下载并保存私钥文件\n• 本地设置权限: <code>chmod 600 ${keyName}</code>\n• 使用 <code>${mainPrefix}ssh keys</code> 查看所有密钥`,
+        text: `✅ <b>SSH密钥生成成功</b>\n\n📁 密钥包已发送到: ${targetChat === "me" ? "收藏夹" : htmlEscape(targetChat)}\n🔑 公钥${modeText}\n📊 当前共有 ${keyCount} 个授权密钥\n\n<b>服务器信息：</b>\n🖥️ 主机: ${htmlEscape(hostname)}\n🌐 IP: ${htmlEscape(ipAddress)}\n🔌 端口: ${htmlEscape(sshPort)}\n\n<b>连接命令：</b>\n<code>ssh -i ${htmlEscape(keyName)} root@${htmlEscape(ipAddress)} -p ${htmlEscape(sshPort)}</code>${setupMessage}\n\n💡 <b>提示：</b>\n• 请下载并保存私钥文件\n• 本地设置权限: <code>chmod 600 ${htmlEscape(keyName)}</code>\n• 使用 <code>${htmlEscape(mainPrefix)}ssh keys</code> 查看所有密钥`,
         parseMode: "html"
       });
 
@@ -709,9 +723,9 @@ class SSHPlugin extends Plugin {
         }
         
         keyList += `🔑 <b>密钥 ${index + 1}:</b>\n`;
-        keyList += `   类型: <code>${keyType}</code>\n`;
+        keyList += `   类型: <code>${htmlEscape(keyType)}</code>\n`;
         keyList += `   备注: <code>${htmlEscape(comment)}</code>\n`;
-        keyList += `   预览: <code>${keyPreview}</code>\n`;
+        keyList += `   预览: <code>${htmlEscape(keyPreview)}</code>\n`;
         
         // 如果密钥格式有问题，添加警告
         if (keyType.includes('⚠️') || keyType.includes('❌')) {
@@ -992,11 +1006,11 @@ ${keysContent}`;
       // 提供关闭旧端口的提示
       let oldPortWarning = "";
       if (currentPort !== "22" && currentPort !== String(port)) {
-        oldPortWarning = `\n\n💡 <b>提示:</b> 旧端口 ${currentPort} 的防火墙规则仍然开放\n如需关闭请执行: <code>${mainPrefix}ssh close ${currentPort}</code>`;
+        oldPortWarning = `\n\n💡 <b>提示:</b> 旧端口 ${htmlEscape(currentPort)} 的防火墙规则仍然开放\n如需关闭请执行: <code>${mainPrefix}ssh close ${htmlEscape(currentPort)}</code>`;
       }
 
       await msg.edit({
-        text: `✅ <b>SSH端口修改成功</b>\n\n🔧 新端口: <code>${port}</code>\n🛡️ 防火墙: 已自动开放 TCP/UDP ${port}\n📄 备份文件: /etc/ssh/sshd_config.backup.${timestamp}${oldPortWarning}\n\n⚠️ <b>重要:</b> 请用新端口测试连接后再断开当前会话`,
+        text: `✅ <b>SSH端口修改成功</b>\n\n🔧 新端口: <code>${port}</code>\n🛡️ 防火墙: 已自动开放 TCP/UDP ${port}\n📄 备份文件: /etc/ssh/sshd_config.backup.${htmlEscape(timestamp)}${oldPortWarning}\n\n⚠️ <b>重要:</b> 请用新端口测试连接后再断开当前会话`,
         parseMode: "html"
       });
     } catch (error: any) {
@@ -1011,7 +1025,7 @@ ${keysContent}`;
     
     if (!enable && !disable) {
       await msg.edit({
-        text: `❌ <b>无效的参数</b>\n\n使用: <code>${mainPrefix}ssh pwauth on</code> 或 <code>${mainPrefix}ssh pwauth off</code>`,
+        text: `❌ <b>无效的参数</b>\n\n使用: <code>${mainPrefix}ssh pwauth on/off</code>`,
         parseMode: "html"
       });
       return;
@@ -1055,7 +1069,7 @@ ${keysContent}`;
     
     if (!enable && !disable) {
       await msg.edit({
-        text: `❌ <b>无效的参数</b>\n\n使用: <code>${mainPrefix}ssh keyauth on</code> 或 <code>${mainPrefix}ssh keyauth off</code>`,
+        text: `❌ <b>无效的参数</b>\n\n使用: <code>${mainPrefix}ssh keyauth on/off</code>`,
         parseMode: "html"
       });
       return;
@@ -1267,7 +1281,7 @@ ${keysContent}`;
       }
 
       await msg.edit({
-        text: `✅ <b>SSH服务重启成功</b>\n\n重启命令: <code>${restartResult.command}</code>\n服务状态: ${sshStatus}\n\n💡 建议重启后验证SSH连接`,
+        text: `✅ <b>SSH服务重启成功</b>\n\n重启命令: <code>${htmlEscape(restartResult.command || "未知")}</code>\n服务状态: ${sshStatus}\n\n💡 建议重启后验证SSH连接`,
         parseMode: "html"
       });
     } catch (error: any) {
@@ -1368,7 +1382,7 @@ ${keysContent}`;
       return;
     }
 
-    await msg.edit({ text: `🔄 正在设置接收目标为: ${target}...`, parseMode: "html" });
+      await msg.edit({ text: `🔄 正在设置接收目标为: ${htmlEscape(target)}...`, parseMode: "html" });
 
     try {
       // 验证目标是否有效
@@ -1499,13 +1513,13 @@ ${keysContent}`;
       try {
         const hostname = (await execAsync("hostname")).stdout.trim();
         const uptime = (await execAsync("uptime -p 2>/dev/null || echo '未知'")).stdout.trim();
-        systemInfo = `\n\n<b>系统信息：</b>\n主机名: <code>${hostname}</code>\n运行时间: ${uptime}`;
+        systemInfo = `\n\n<b>系统信息：</b>\n主机名: <code>${htmlEscape(hostname)}</code>\n运行时间: ${htmlEscape(uptime)}`;
       } catch {
         systemInfo = "";
       }
 
       await msg.edit({
-        text: `📊 <b>SSH状态信息</b>\n\n<b>SSH服务状态：</b>\n服务状态: ${sshStatus}\n端口: <code>${actualPort}</code>\n\n<b>认证配置：</b>\n密码登录: ${actualPasswordAuth}\nRoot登录: ${rootLogin}\n密钥登录: ${actualPubkeyAuth}\n已授权密钥: ${keyCount} 个${iptablesInfo}\n\n<b>插件配置：</b>\n接收目标: <code>${htmlEscape(targetChat)}</code>\n${targetChat === "me" ? "(发送到收藏夹)" : "(发送到指定会话)"}\n\n<b>相关文件：</b>\n• SSH配置: /etc/ssh/sshd_config\n• 授权密钥: /root/.ssh/authorized_keys${systemInfo}`,
+        text: `📊 <b>SSH状态信息</b>\n\n<b>SSH服务状态：</b>\n服务状态: ${sshStatus}\n端口: <code>${htmlEscape(actualPort)}</code>\n\n<b>认证配置：</b>\n密码登录: ${actualPasswordAuth}\nRoot登录: ${rootLogin}\n密钥登录: ${actualPubkeyAuth}\n已授权密钥: ${keyCount} 个${iptablesInfo}\n\n<b>插件配置：</b>\n接收目标: <code>${htmlEscape(targetChat)}</code>\n${targetChat === "me" ? "(发送到收藏夹)" : "(发送到指定会话)"}\n\n<b>相关文件：</b>\n• SSH配置: /etc/ssh/sshd_config\n• 授权密钥: /root/.ssh/authorized_keys${systemInfo}`,
         parseMode: "html"
       });
     } catch (error: any) {
@@ -1547,4 +1561,3 @@ ${keysContent}`;
 }
 
 export default new SSHPlugin();
-

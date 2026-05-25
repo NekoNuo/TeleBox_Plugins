@@ -1,12 +1,13 @@
 import { getPrefixes } from "@utils/pluginManager";
 import { Plugin } from "@utils/pluginBase";
-import { Api } from "telegram";
+import { Api } from "teleproto";
 import { createDirectoryInAssets } from "@utils/pathHelpers";
 import { cronManager } from "@utils/cronManager";
 import * as cron from "cron";
 import { JSONFilePreset } from "lowdb/node";
 import * as path from "path";
 import { getGlobalClient } from "@utils/globalClient";
+import { safeGetMessages, safeGetReplyMessage } from "@utils/safeGetMessages";
 import { reviveEntities } from "@utils/tlRevive";
 import {
   dealCommandPluginWithMessage,
@@ -18,7 +19,7 @@ const mainPrefix = prefixes[0];
 
 const filePath = path.join(
   createDirectoryInAssets("acron"),
-  "acron_config.json"
+  "acron_config.json",
 );
 
 function getRemarkFromMsg(msg: Api.Message | string, n: number): string {
@@ -142,7 +143,7 @@ function formatDate(date: Date): string {
 async function formatEntity(
   target: any,
   mention?: boolean,
-  throwErrorIfFailed?: boolean
+  throwErrorIfFailed?: boolean,
 ) {
   const client = await getGlobalClient();
   if (!client) throw new Error("Telegram 客户端未初始化");
@@ -160,7 +161,7 @@ async function formatEntity(
     console.error(e);
     if (throwErrorIfFailed)
       throw new Error(
-        `无法获取 ${target} 的 entity: ${e?.message || "未知错误"}`
+        `无法获取 ${target} 的 entity: ${e?.message || "未知错误"}`,
       );
   }
   const displayParts: string[] = [];
@@ -170,14 +171,14 @@ async function formatEntity(
   if (entity?.lastName) displayParts.push(entity.lastName);
   if (entity?.username)
     displayParts.push(
-      mention ? `@${entity.username}` : `<code>@${entity.username}</code>`
+      mention ? `@${entity.username}` : `<code>@${entity.username}</code>`,
     );
 
   if (id) {
     displayParts.push(
       entity instanceof Api.User
         ? `<a href="tg://user?id=${id}">${id}</a>`
-        : `<a href="https://t.me/c/${id}">${id}</a>`
+        : `<a href="https://t.me/c/${id}">${id}</a>`,
     );
   } else if (!target?.className) {
     displayParts.push(`<code>${target}</code>`);
@@ -195,7 +196,7 @@ function makeCronKey(id: string) {
 }
 
 function parseCronFromArgs(
-  args: string[]
+  args: string[],
 ): { cron: string; rest: string[] } | null {
   // 优先按 6 段解析 (second minute hour dayOfMonth month dayOfWeek)
   const n6 = 6;
@@ -293,10 +294,11 @@ async function scheduleTask(task: AcronTask) {
       if (task.type === "send") {
         const t = task as SendTask;
         const entities = reviveEntities(t.entities);
+        const replyTo = t.replyTo ? toInt(t.replyTo) : undefined;
         await client.sendMessage(entityLike, {
           message: t.message,
           formattingEntities: entities,
-          replyTo: t.replyTo ? toInt(t.replyTo) : undefined,
+          ...(replyTo ? { replyTo } : {}),
         });
         if (idx >= 0) {
           db.data.tasks[idx].lastRunAt = String(now);
@@ -307,9 +309,10 @@ async function scheduleTask(task: AcronTask) {
       } else if (task.type === "cmd") {
         const t = task as CmdTask;
         const cmd = await getCommandFromMessage(t.message);
+        const replyTo = t.replyTo ? toInt(t.replyTo) : undefined;
         const sudoMsg = await client.sendMessage(entityLike, {
           message: t.message,
-          replyTo: t.replyTo ? toInt(t.replyTo) : undefined,
+          ...(replyTo ? { replyTo } : {}),
         });
         if (cmd && sudoMsg)
           await dealCommandPluginWithMessage({ cmd, msg: sudoMsg as any });
@@ -326,16 +329,17 @@ async function scheduleTask(task: AcronTask) {
         try {
           // 获取源消息（尽量使用完整实体以避免 hash 失效）
           const fromEntityLike = (fromChatIdNum as any) ?? t.fromChatId;
-          const messages = await client.getMessages(fromEntityLike as any, {
+          const messages = await safeGetMessages(client, fromEntityLike as any, {
             ids: fromMsgIdNum,
           });
           const realtimeMsg = messages?.[0] as any;
           if (!realtimeMsg) throw new Error("未能获取源消息");
 
           // 复制发送（保留文本/实体/媒体）
+          const replyTo = t.replyTo ? toInt(t.replyTo) : undefined;
           await client.sendMessage(entityLike, {
             message: realtimeMsg, // 直接传入消息对象以便自动处理媒体/实体
-            replyTo: t.replyTo ? toInt(t.replyTo) : undefined,
+            ...(replyTo ? { replyTo } : {}),
             formattingEntities: realtimeMsg.entities,
           });
 
@@ -365,7 +369,7 @@ async function scheduleTask(task: AcronTask) {
             toPeer: entityLike,
             // 如果在论坛话题中，指定话题的顶层消息 ID
             ...(t.replyTo ? { topMsgId: toInt(t.replyTo) } : {}),
-          })
+          }),
         );
         if (idx >= 0) {
           db.data.tasks[idx].lastRunAt = String(now);
@@ -388,7 +392,7 @@ async function scheduleTask(task: AcronTask) {
       } else if (task.type === "del_re") {
         const t = task as DelReTask;
         const limitNum = toInt(t.limit) ?? 100;
-        const messages = await client.getMessages(entityLike, {
+        const messages = await safeGetMessages(client, entityLike, {
           limit: limitNum,
         });
         const re = tryParseRegex(t.regex);
@@ -522,7 +526,7 @@ ${mainPrefix}a foo bar</pre>
 每天2点自动备份(调用 <code>${mainPrefix}bf</code> 命令)
 
 <pre>${mainPrefix}acron cmd 0 0 2 * * * me 定时备份
-.bf</pre>
+${mainPrefix}bf</pre>
 
 每天2点自动更新 <code>eat</code> 的表情包配置(调用 <code>${mainPrefix}eat set</code> 命令)
 
@@ -539,6 +543,7 @@ ${mainPrefix}eat set</pre>
 `;
 
 class AcronPlugin extends Plugin {
+
   description: string = `定时发送/转发/复制/置顶/取消置顶/删除消息/执行命令\n\n${help_text}`;
   cmdHandlers: Record<
     string,
@@ -588,20 +593,20 @@ class AcronPlugin extends Plugin {
             tp === "send"
               ? "发送"
               : tp === "cmd"
-              ? "命令"
-              : tp === "copy"
-              ? "复制"
-              : tp === "forward"
-              ? "转发"
-              : tp === "del"
-              ? "删除"
-              : tp === "del_re"
-              ? "正则删除"
-              : tp === "pin"
-              ? "置顶"
-              : tp === "unpin"
-              ? "取消置顶"
-              : String(tp || "");
+                ? "命令"
+                : tp === "copy"
+                  ? "复制"
+                  : tp === "forward"
+                    ? "转发"
+                    : tp === "del"
+                      ? "删除"
+                      : tp === "del_re"
+                        ? "正则删除"
+                        : tp === "pin"
+                          ? "置顶"
+                          : tp === "unpin"
+                            ? "取消置顶"
+                            : String(tp || "");
 
           const db = await getDB();
           const chatId = Number(msg.chatId);
@@ -609,7 +614,7 @@ class AcronPlugin extends Plugin {
             .filter(
               (t) =>
                 (scopeAll ? true : Number((t as any).chatId) === chatId) &&
-                (!typeFilter || t.type === typeFilter)
+                (!typeFilter || t.type === typeFilter),
             )
             // 先展示已启用的，再展示已禁用的
             .sort((a, b) => {
@@ -624,8 +629,8 @@ class AcronPlugin extends Plugin {
                 ? `暂无类型为 ${typeLabel(typeFilter)} 的定时任务`
                 : "暂无定时任务"
               : typeFilter
-              ? `当前会话暂无类型为 ${typeLabel(typeFilter)} 的定时任务`
-              : "当前会话暂无定时任务";
+                ? `当前会话暂无类型为 ${typeLabel(typeFilter)} 的定时任务`
+                : "当前会话暂无定时任务";
             await msg.edit({ text: noneText });
             return;
           }
@@ -636,8 +641,8 @@ class AcronPlugin extends Plugin {
               ? `📋 所有 ${typeLabel(typeFilter)} 定时任务`
               : "📋 所有定时任务"
             : typeFilter
-            ? `📋 当前会话 ${typeLabel(typeFilter)} 定时任务`
-            : "📋 当前会话定时任务";
+              ? `📋 当前会话 ${typeLabel(typeFilter)} 定时任务`
+              : "📋 当前会话定时任务";
           lines.push(header);
           lines.push("");
 
@@ -651,17 +656,17 @@ class AcronPlugin extends Plugin {
             for (const t of enabledTasks) {
               const nextDt = cron.sendAt(t.cron);
               const entityInfo = await formatEntity(
-                (t as any).chatId ?? t.chat
+                (t as any).chatId ?? t.chat,
               );
               const title = `<code>${t.id}</code> • <code>${typeLabel(
-                t.type
+                t.type,
               )}</code>${t.remark ? ` • ${t.remark}` : ""}`;
               lines.push(title);
               lines.push(
                 `对话: ${
                   (entityInfo?.entity ? entityInfo?.display : t.display) ||
                   `<code>${t.chat}</code>`
-                }`
+                }`,
               );
               const msgId = (t as any)?.msgId;
               const fromChatId = (t as any)?.fromChatId;
@@ -669,15 +674,15 @@ class AcronPlugin extends Plugin {
               if (msgId) {
                 lines.push(
                   `消息: <a href="https://t.me/c/${String(
-                    (t as any).chatId ?? t.chat
-                  ).replace("-100", "")}/${msgId}">${msgId}</a>`
+                    (t as any).chatId ?? t.chat,
+                  ).replace("-100", "")}/${msgId}">${msgId}</a>`,
                 );
               }
               if (fromChatId && fromMsgId) {
                 lines.push(
                   `消息: <a href="https://t.me/c/${String(
-                    fromChatId ?? ""
-                  ).replace("-100", "")}/${fromMsgId}">${fromMsgId}</a>`
+                    fromChatId ?? "",
+                  ).replace("-100", "")}/${fromMsgId}">${fromMsgId}</a>`,
                 );
               }
               if (
@@ -690,8 +695,8 @@ class AcronPlugin extends Plugin {
                 if (replyId)
                   lines.push(
                     `回复: <a href="https://t.me/c/${String(
-                      (t as any).chatId ?? t.chat
-                    ).replace("-100", "")}/${replyId}">${replyId}</a>`
+                      (t as any).chatId ?? t.chat,
+                    ).replace("-100", "")}/${replyId}">${replyId}</a>`,
                   );
               }
               if (nextDt) {
@@ -699,13 +704,13 @@ class AcronPlugin extends Plugin {
                   typeof (nextDt as any)?.toJSDate === "function"
                     ? (nextDt as any).toJSDate()
                     : nextDt instanceof Date
-                    ? nextDt
-                    : new Date(Number(nextDt));
+                      ? nextDt
+                      : new Date(Number(nextDt));
                 lines.push(`下次: ${formatDate(dt)}`);
               }
               if (t.lastRunAt) {
                 lines.push(
-                  `上次: ${formatDate(new Date(Number(t.lastRunAt)))}`
+                  `上次: ${formatDate(new Date(Number(t.lastRunAt)))}`,
                 );
               }
               if (t.lastResult) lines.push(`结果: ${t.lastResult}`);
@@ -720,19 +725,19 @@ class AcronPlugin extends Plugin {
             lines.push("");
             for (const t of disabledTasks) {
               const entityInfo = await formatEntity(
-                (t as any).chatId ?? t.chat
+                (t as any).chatId ?? t.chat,
               );
               const title = `<code>${t.id}</code> • <code>${typeLabel(
-                t.type
+                t.type,
               )}</code>${t.remark ? ` • ${t.remark}` : ""}`;
               lines.push(title);
               lines.push(
-                `对话: ${entityInfo?.display || `<code>${t.chat}</code>`}`
+                `对话: ${entityInfo?.display || `<code>${t.chat}</code>`}`,
               );
               // 禁用状态不显示下次执行
               if (t.lastRunAt) {
                 lines.push(
-                  `上次: ${formatDate(new Date(Number(t.lastRunAt)))}`
+                  `上次: ${formatDate(new Date(Number(t.lastRunAt)))}`,
                 );
               }
               if (t.lastResult) lines.push(`结果: ${t.lastResult}`);
@@ -765,7 +770,7 @@ class AcronPlugin extends Plugin {
           const id = args[1];
           if (!id) {
             await msg.edit({
-              text: "请提供定时任务ID: <code>${mainPrefix}acron rm ID</code>",
+              text: `请提供定时任务ID: <code>${mainPrefix}acron rm ID</code>`,
               parseMode: "html",
             });
             return;
@@ -847,7 +852,7 @@ class AcronPlugin extends Plugin {
             const nextAt = cron.sendAt(t.cron);
             await msg.edit({
               text: `▶️ 已启用任务 <code>${id}</code>\n下次执行: ${formatDate(
-                nextAt.toJSDate()
+                nextAt.toJSDate(),
               )}`,
               parseMode: "html",
             });
@@ -912,7 +917,7 @@ class AcronPlugin extends Plugin {
               await msg.edit({ text: "请回复一条要定时发送的消息" });
               return;
             }
-            const replied = await msg.getReplyMessage();
+            const replied = await safeGetReplyMessage(msg);
             const mm: any = replied || {};
             // 不支持多媒体或按钮
             if (mm.media || mm.replyMarkup) {
@@ -1013,7 +1018,7 @@ class AcronPlugin extends Plugin {
               await msg.edit({ text: "请回复一条要复制/转发的源消息" });
               return;
             }
-            const replied = await msg.getReplyMessage();
+            const replied = await safeGetReplyMessage(msg);
             const mm: any = replied || {};
             const fromMsgId = toInt(mm.id);
             const fromChatId = toInt(mm.chatId);

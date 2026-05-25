@@ -1,9 +1,9 @@
 // zpr Plugin - 随机纸片人插件
 //@ts-nocheck
 import { Plugin } from "@utils/pluginBase";
-import { Api } from "telegram";
-import { CustomFile } from "telegram/client/uploads";
-import { getGlobalClient } from "@utils/globalClient";
+import { Api } from "teleproto";
+import { CustomFile } from "teleproto/client/uploads";
+import { getGlobalClient, tryGetCurrentGenerationContext } from "@utils/globalClient";
 import { getPrefixes } from "@utils/pluginManager";
 import { createDirectoryInAssets } from "@utils/pathHelpers";
 import path from "path";
@@ -56,6 +56,26 @@ const getHeaders = (proxyHost: string) => {
 };
 
 const dataPath = createDirectoryInAssets("zpr");
+
+async function lifecycleDelay(ms: number, label: string): Promise<void> {
+    const lifecycle = tryGetCurrentGenerationContext();
+    if (lifecycle) {
+        await lifecycle.delay(ms, { label });
+        return;
+    }
+    await new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function scheduleAbort(controller: AbortController, ms: number, label: string): () => void {
+    const lifecycle = tryGetCurrentGenerationContext();
+    if (lifecycle) {
+        const handle = lifecycle.setTimeout(() => controller.abort(), ms, { label });
+        return () => clearTimeout(handle);
+    }
+
+    const handle = setTimeout(() => controller.abort(), ms);
+    return () => clearTimeout(handle);
+}
 
 // 配置管理器
 class ZprConfigManager {
@@ -124,6 +144,20 @@ class ZprConfigManager {
         await this.createDefaultConfig();
     }
 
+    static cleanup(): void {
+        // 引用重置：清空静态 db 和初始化标志，便于 reload 后重新初始化。
+        this.db = null;
+        this.initialized = false;
+        this.isWriting = false;
+    }
+
+    static async reinit(): Promise<void> {
+        // 强制重新初始化，用于 reload 后的 setup
+        this.initialized = false;
+        this.db = null;
+        await this.init();
+    }
+
     private static async createBackup(): Promise<void> {
         try {
             const configExists = await fs.access(this.configPath).then(() => true).catch(() => false);
@@ -149,7 +183,7 @@ class ZprConfigManager {
                     await this.restoreFromBackup();
                     throw writeError;
                 }
-                await new Promise(resolve => setTimeout(resolve, attempt * 200));
+                await lifecycleDelay(attempt * 200, "zpr:config-write-retry");
             }
         }
         return false;
@@ -221,7 +255,6 @@ const help_text = `🎨 <b>随机纸片人插件</b>
 • <code>${mainPrefix}zpr r18 [数量]</code> - 获取指定数量R18图片
 • <code>${mainPrefix}zpr proxy</code> - 查看当前反代设置
 • <code>${mainPrefix}zpr proxy [地址]</code> - 设置反代地址
-• <code>${mainPrefix}zpr help</code> - 显示此帮助
 
 <b>使用示例：</b>
 <code>${mainPrefix}zpr</code> - 随机1张
@@ -319,7 +352,7 @@ async function downloadSingleImage(
     for (const proxyHost of proxyList) {
         try {
             const imgController = new AbortController();
-            const imgTimeoutId = setTimeout(() => imgController.abort(), 30000);
+            const clearImgTimeout = scheduleAbort(imgController, 30000, "zpr:image-timeout");
             
             try {
                 const imgResponse = await axios.get(urls.regular, {
@@ -358,7 +391,7 @@ async function downloadSingleImage(
                     continue; // 尝试下一个代理
                 }
             } finally {
-                clearTimeout(imgTimeoutId);
+                clearImgTimeout();
             }
             
         } catch (error: any) {
@@ -408,7 +441,7 @@ async function getResult(message: Api.Message, r18 = 0, tag = "", num = 1): Prom
         
         // 直接调用API，使用当前配置的代理参数
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 10000);
+        const clearApiTimeout = scheduleAbort(controller, 10000, "zpr:api-timeout");
         
         let response;
         try {
@@ -421,7 +454,7 @@ async function getResult(message: Api.Message, r18 = 0, tag = "", num = 1): Prom
                 }
             );
         } finally {
-            clearTimeout(timeoutId);
+            clearApiTimeout();
         }
         
         if (response.status !== 200) {
@@ -513,6 +546,16 @@ async function getResult(message: Api.Message, r18 = 0, tag = "", num = 1): Prom
 }
 
 class ZprPlugin extends Plugin {
+  cleanup(): void {
+    // 引用重置：清空 ZprConfigManager 的静态引用，便于 reload 后重新初始化。
+    ZprConfigManager.cleanup();
+  }
+
+  async setup(): Promise<void> {
+    // 重新初始化配置管理器，确保 reload 后可用
+    await ZprConfigManager.reinit();
+  }
+
     description = `随机纸片人插件\n\n${help_text}`;
     
     cmdHandlers: Record<string, (msg: Api.Message, trigger?: Api.Message) => Promise<void>> = {
@@ -548,7 +591,7 @@ class ZprPlugin extends Plugin {
 
 <b>可用地址:</b>
 ${Object.entries(PROXY_HOSTS).map(([key, value]) => 
-`• <code>${value}</code> - ${key}`).join('\n')}
+`• <code>${htmlEscape(value)}</code> - ${htmlEscape(key)}`).join('\n')}
 
 <b>使用方法:</b>
 <code>${mainPrefix}zpr proxy [地址]</code> - 设置反代地址`);
@@ -645,13 +688,13 @@ ${Object.entries(PROXY_HOSTS).map(([key, value]) =>
                                 }),
                                 caption: item.caption,
                                 parseMode: 'html',
-                                replyTo: msg.replyTo?.replyToMsgId
+                                replyTo: msg.replyTo?.replyToTopId || msg.replyTo?.replyToMsgId
                             });
 
                         } catch (error: any) {
                             const errorMsg = error.message?.includes("CHAT_SEND_MEDIA_FORBIDDEN")
                                 ? "此群组不允许发送媒体。"
-                                : `发送失败: ${htmlEscape(error.message || "未知错误")}`;
+                                : htmlEscape(`发送失败: ${error.message || "未知错误"}`);
                             
                             await editHtmlMessage(msg, `❌ <b>发送失败:</b> ${errorMsg}`);
                             throw error; // 继续抛出错误以中断循环

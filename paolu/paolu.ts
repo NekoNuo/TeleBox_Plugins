@@ -1,6 +1,12 @@
 import { Plugin } from "@utils/pluginBase";
-import { Api, TelegramClient } from "telegram";
+import { getPrefixes } from "@utils/pluginManager";
+import { Api, TelegramClient } from "teleproto";
 import { getGlobalClient } from "@utils/globalClient";
+
+import { safeGetMe } from "@utils/authGuards";
+const prefixes = getPrefixes();
+const mainPrefix = prefixes[0];
+
 
 // HTML转义工具（每个插件必须实现）
 const htmlEscape = (text: string): string => 
@@ -12,7 +18,7 @@ const htmlEscape = (text: string): string =>
 // 帮助文档常量
 const help_text = `<b>⚠️ 一键跑路</b>
 
-<code>.paolu</code> - 删除群内所有消息并禁言所有成员
+<code>${mainPrefix}paolu</code> - 删除群内所有消息并禁言所有成员
 
 <b>警告：</b>此操作不可逆，请谨慎使用！`;
 
@@ -20,7 +26,21 @@ const help_text = `<b>⚠️ 一键跑路</b>
 const sleep = (ms: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, ms));
 
+// Timer tracking for safe cleanup
+const pendingTimers = new Set<ReturnType<typeof setTimeout>>();
+
+function scheduleTimer(fn: () => void, ms: number): ReturnType<typeof setTimeout> {
+  const t = setTimeout(() => {
+    pendingTimers.delete(t);
+    fn();
+  }, ms);
+  pendingTimers.add(t);
+  return t;
+}
+
+
 class PaoluPlugin extends Plugin {
+
   description: string = `群组一键跑路插件 - 删除消息并禁言所有成员\n\n${help_text}`;
   
   cmdHandlers: Record<string, (msg: Api.Message) => Promise<void>> = {
@@ -43,7 +63,8 @@ class PaoluPlugin extends Plugin {
 
     try {
       // 检查管理员权限
-      const me = await client.getMe();
+      const me = await safeGetMe(client);
+           if (!me) return;
       let isAdmin = false;
       
       try {
@@ -208,7 +229,7 @@ class PaoluPlugin extends Plugin {
         });
 
         // 10秒后自动删除完成提示
-        setTimeout(async () => {
+        scheduleTimer(async () => {
           try {
             await completionMsg.delete({ revoke: true });
           } catch (e) {
@@ -271,6 +292,12 @@ class PaoluPlugin extends Plugin {
       }
       return false;
     }
+  }
+  cleanup(): void {
+    for (const timer of pendingTimers) {
+      clearTimeout(timer);
+    }
+    pendingTimers.clear();
   }
 }
 

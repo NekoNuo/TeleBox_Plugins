@@ -1,5 +1,5 @@
 import { Plugin } from "@utils/pluginBase";
-import { Api } from "telegram";
+import { Api } from "teleproto";
 import { getGlobalClient } from "@utils/globalClient";
 import { getPrefixes } from "@utils/pluginManager";
 
@@ -56,6 +56,7 @@ const help_text = `📢 <b>AtAll</b>
 • 一般来说你可以通过置顶消息来提醒所有人的`;
 
 class AtAllPlugin extends Plugin {
+
   description = help_text;
   
   cmdHandlers = {
@@ -74,13 +75,13 @@ class AtAllPlugin extends Plugin {
           return;
         }
 
-        const chatId = chat.id;
+        const chatId = String(chat.id);
         
         // 显示处理中
-        const processingMsg = await msg.edit({
+        const processingMsg = (await msg.edit({
           text: "🔄 正在获取群组成员列表...",
           parseMode: "html"
-        });
+        })) ?? msg;
 
         // 获取所有群组成员
         const participants = await client.getParticipants(chatId, {});
@@ -120,7 +121,7 @@ class AtAllPlugin extends Plugin {
                 displayName += ` ${participant.lastName}`;
               }
             } else if ("title" in participant && participant.title) {
-              displayName = participant.title;
+              displayName = String(participant.title);
             } else {
               continue;
             }

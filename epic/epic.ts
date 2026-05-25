@@ -1,5 +1,5 @@
 import { Plugin } from "@utils/pluginBase";
-import { Api } from "telegram";
+import { Api } from "teleproto";
 import { getGlobalClient } from "@utils/globalClient";
 import { getPrefixes } from "@utils/pluginManager";
 import axios from "axios";
@@ -20,7 +20,6 @@ const help_text = `⚙️ <b>Epic 限免游戏</b>
 
 <b>🔧 使用方法:</b>
 • <code>${mainPrefix}epic</code> - 查看当前限免游戏
-• <code>${mainPrefix}epic help</code> - 显示帮助
 
 <b>📊 数据来源:</b>
 • Epic Games Store API`;
@@ -112,7 +111,7 @@ function buildGameText(game: EpicGame, index: number): string {
   const desc = game.description.length > 100 ? htmlEscape(game.description.slice(0, 100)) + "..." : htmlEscape(game.description);
   const start = formatDate(game.startDate);
   const end = formatDate(game.endDate);
-  const link = game.url ? `<a href="${game.url}">🔗 领取</a>` : "";
+  const link = game.url ? `<a href="${htmlEscape(game.url)}">🔗 领取</a>` : "";
 
   return `<b>${index}. ${title}</b>
 💰 原价: <code>${htmlEscape(game.originalPrice)}</code> → <b>免费</b>
@@ -122,6 +121,7 @@ ${link}`;
 }
 
 class EpicPlugin extends Plugin {
+
   description: string = help_text;
 
   cmdHandlers: Record<string, (msg: Api.Message) => Promise<void>> = {

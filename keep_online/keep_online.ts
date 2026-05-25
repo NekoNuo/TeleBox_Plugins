@@ -1,11 +1,12 @@
 import { getPrefixes } from "@utils/pluginManager";
 import { Plugin } from "@utils/pluginBase";
 import { getGlobalClient } from "@utils/globalClient";
-import { Api } from "telegram";
+import { Api } from "teleproto";
 import { createDirectoryInTemp } from "@utils/pathHelpers";
 import fs from "fs";
 import path from "path";
 
+import { safeGetMe } from "@utils/authGuards";
 const prefixes = getPrefixes();
 const mainPrefix = prefixes[0];
 
@@ -33,12 +34,9 @@ class KeepOnlinePlugin extends Plugin {
       description: `${help_text}`,
       handler: async (client: Api.Client) => {
         try {
-          // const isConnected = client?.connected === true;
-          const dialogs = await client.getDialogs({});
-          if (dialogs) {
-            const timestamp = Date.now() / 1000;
-            fs.writeFileSync(file, `${timestamp.toFixed(0)}`, "utf-8");
-          }
+          await safeGetMe(client);
+          const timestamp = Date.now() / 1000;
+          fs.writeFileSync(file, `${timestamp.toFixed(0)}`, "utf-8");
         } catch (e) {}
       },
     },

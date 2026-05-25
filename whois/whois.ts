@@ -2,12 +2,13 @@ import { Plugin } from "@utils/pluginBase";
 import { getGlobalClient } from "@utils/globalClient";
 import { getPrefixes } from "@utils/pluginManager";
 import { createDirectoryInAssets } from "@utils/pathHelpers";
-import { Api } from "telegram";
+import { Api } from "teleproto";
 import axios from "axios";
 import { JSONFilePreset } from "lowdb/node";
 import path from "path";
 import dayjs from "dayjs";
 import relativeTime from "dayjs/plugin/relativeTime";
+import { safeGetMessages } from "@utils/safeGetMessages";
 import "dayjs/locale/zh-cn";
 
 // 配置 dayjs
@@ -41,7 +42,6 @@ const help_text = `🔍 <b>WHOIS 域名查询</b>
 • <code>${mainPrefix}whois batch &lt;域名1&gt; &lt;域名2&gt;...</code> - 批量查询
 • <code>${mainPrefix}whois history</code> - 查看查询历史
 • <code>${mainPrefix}whois clear</code> - 清除历史记录
-• <code>${mainPrefix}whois help</code> - 显示帮助
 
 <b>💡 示例：</b>
 • <code>${mainPrefix}whois google.com</code>
@@ -79,6 +79,10 @@ interface WhoisDB {
 }
 
 class WhoisPlugin extends Plugin {
+  cleanup(): void {
+    this.db = undefined;
+  }
+
   description = help_text;
   private db?: Awaited<ReturnType<typeof JSONFilePreset<WhoisDB>>>;
   private pluginDir: string;
@@ -163,7 +167,7 @@ class WhoisPlugin extends Plugin {
       if (msg.replyTo && 'replyToMsgId' in msg.replyTo && msg.replyTo.replyToMsgId) {
         try {
           const replyMsgId = msg.replyTo.replyToMsgId;
-          const messages = await client.getMessages(msg.peerId!, {
+          const messages = await safeGetMessages(client, msg.peerId!, {
             ids: [replyMsgId]
           });
           
@@ -193,7 +197,6 @@ class WhoisPlugin extends Plugin {
       // 无参数时显示错误提示
       if (!domain) {
         await msg.edit({
-          text: `❌ <b>参数不足</b>\n\n💡 使用 <code>${mainPrefix}whois &lt;域名&gt;</code> 查询域名信息\n💡 或回复包含域名的消息\n\n📖 使用 <code>${mainPrefix}whois help</code> 查看帮助`,
           parseMode: "html"
         });
         return;
@@ -413,7 +416,7 @@ class WhoisPlugin extends Plugin {
     // 添加原始数据（折叠显示）
     if (record.rawData) {
       formattedOutput += `\n<b>📄 原始 WHOIS 数据：</b>\n`;
-      formattedOutput += `<pre>${htmlEscape(record.rawData.substring(0, 3000))}</pre>`;
+      formattedOutput += `<blockquote expandable>${htmlEscape(record.rawData.substring(0, 3000))}</blockquote>`;
       
       if (record.rawData.length > 3000) {
         formattedOutput += `\n<i>（数据已截断，仅显示前 3000 字符）</i>`;

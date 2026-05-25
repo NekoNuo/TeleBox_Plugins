@@ -1,8 +1,9 @@
 
 import { Plugin } from "@utils/pluginBase";
-import { Api } from "telegram";
+import { Api } from "teleproto";
 import { getPrefixes } from "@utils/pluginManager";
 import axios from "axios";
+import { safeGetReplyMessage } from "@utils/safeGetMessages";
 
 // HTML转义函数
 const htmlEscape = (text: string): string =>
@@ -28,6 +29,7 @@ const help_text = `🖼️ <b>搜图插件</b>
 • <code>${mainPrefix}${pluginName} help</code> - 显示此帮助消息`;
 
 class SoutuPlugin extends Plugin {
+
   description: string = `回复图片进行搜图\n\n${help_text}`;
 
   cmdHandlers = {
@@ -62,7 +64,7 @@ class SoutuPlugin extends Plugin {
 
       } catch (error: any) {
         console.error('[soutu] 插件执行失败:', error);
-        await msg.edit({ text: `❌ <b>操作失败:</b> ${htmlEscape(error.message)}`, parseMode: "html" });
+        await msg.edit({ text: `❌ <b>操作失败:</b> ${htmlEscape(error.message)} (${htmlEscape(pluginName)})`, parseMode: "html" });
       }
     },
   };
@@ -73,7 +75,7 @@ class SoutuPlugin extends Plugin {
       return;
     }
 
-    const replied = await msg.getReplyMessage();
+    const replied = await safeGetReplyMessage(msg);
     if (!replied?.photo) {
       await msg.edit({ text: "❌ <b>错误:</b> 回复的消息不包含图片", parseMode: "html" });
       return;
@@ -97,7 +99,7 @@ class SoutuPlugin extends Plugin {
       else if (head.startsWith('52494646')) filename = "photo.webp";
 
       const form = new globalThis.FormData();
-      form.append("file", new Blob([buffer]), filename);
+      form.append("file", new Blob([new Uint8Array(buffer)]), filename);
 
       const response = await axios.post("https://0x0.st", form, {
         headers: { 'User-Agent': 'curl/8.0.1' },
@@ -115,8 +117,8 @@ class SoutuPlugin extends Plugin {
       const responseText = `🖼️ <b>搜图结果:</b> (<a href="${htmlEscape(imageUrl)}">原图</a>)
 有效期限: 约30天
 
-• <a href="${googleUrl}">Google Lens</a>
-• <a href="${yandexUrl}">Yandex Images</a>`;
+• <a href="${htmlEscape(googleUrl)}">Google Lens</a>
+• <a href="${htmlEscape(yandexUrl)}">Yandex Images</a>`;
 
       await msg.edit({ text: responseText, parseMode: "html" });
 

@@ -3,9 +3,10 @@ import axios from "axios";
 // 不再需要 form-data 依赖，Axios 会自动序列化对象为 FormData
 import { getPrefixes } from "@utils/pluginManager";
 import { Plugin } from "@utils/pluginBase";
-import { Api } from "telegram";
-import { getGlobalClient } from "@utils/globalClient";
+import { Api } from "teleproto";
+import { getGlobalClient, tryGetCurrentGenerationContext } from "@utils/globalClient";
 import { Buffer } from "buffer";
+import { safeGetReplyMessage } from "@utils/safeGetMessages";
 
 // HTML转义
 const htmlEscape = (text: string): string =>
@@ -53,6 +54,7 @@ const commandName = `${mainPrefix}${pluginName}`;
 const help_text = `🗂️ <b>0x0.st 文件上传插件</b>\n\n<b>命令格式：</b>\n<code>${commandName} [expires=小时] [secret]</code>\n\n<b>用法：</b>\n• 回复一条带文件/视频/语音的消息，自动上传到 <a href='https://0x0.st/'>0x0.st</a> 并返回下载链接\n• <code>${commandName} expires=72 secret</code> 设置72小时有效期并启用难猜链接\n• <code>${commandName} help</code> 显示帮助\n\n<b>参数说明：</b>\n• <code>expires=xx</code> 设置有效期（小时）\n• <code>secret</code> 生成更难猜的链接\n`;
 
 class Ox0Plugin extends Plugin {
+
   description: string = `文件上传到 0x0.st\n\n${help_text}`;
   cmdHandlers: Record<string, (msg: Api.Message, trigger?: Api.Message) => Promise<void>> = {
     "0x0": async (msg: Api.Message) => {
@@ -83,7 +85,7 @@ class Ox0Plugin extends Plugin {
 
       let replied: Api.Message | undefined;
       try {
-        replied = await msg.getReplyMessage();
+        replied = await safeGetReplyMessage(msg);
       } catch (e: any) {
         await sendLongMessage(msg, `❌ <b>错误:</b> ${htmlEscape(e.message)}`);
         return;
@@ -133,20 +135,12 @@ class Ox0Plugin extends Plugin {
         }
         if (!filename || filename.length < 3) filename = "file";
 
-        // 临时调试输出
-        let debugInfo = `<b>调试信息</b>\n`;
-        debugInfo += `filename: <code>${htmlEscape(filename)}</code>\n`;
-        debugInfo += `buffer.length: <code>${buffer.length}</code>\n`;
-        debugInfo += `buffer[0:32]: <code>${buffer.slice(0,32).toString('hex')}</code>\n`;
-        debugInfo += `expires: <code>${htmlEscape(expires || "")}</code> secret: <code>${secret ? "1" : "0"}</code>\n`;
-
         // 使用 Node.js 原生 FormData（无需 form-data 依赖）
         const form = new globalThis.FormData();
-  form.append("file", new Blob([new Uint8Array(buffer)], { type: "application/octet-stream" }), filename);
+        form.append("file", new Blob([new Uint8Array(buffer)], { type: "application/octet-stream" }), filename);
         if (expires) form.append("expires", expires);
         if (secret) form.append("secret", "1");
-  const headers = { 'User-Agent': 'curl/8.0.1' };
-  debugInfo += `headers: <code>${JSON.stringify(headers)}</code>\n`;
+        const headers = { 'User-Agent': 'curl/8.0.1' };
 
         try {
           const response = await axios.post("https://0x0.st", form, {
@@ -155,18 +149,22 @@ class Ox0Plugin extends Plugin {
           });
           const url = response.data?.toString().trim();
           if (!url || !url.startsWith("https://0x0.st/")) {
-            await sendLongMessage(msg, `❌ <b>错误:</b> 上传失败或未获取到链接\n${debugInfo}`);
+            await sendLongMessage(msg, `❌ <b>错误:</b> 上传失败或未获取到链接`);
             return;
           }
           await sendLongMessage(msg, `<code>${htmlEscape(url)}</code>`);
         } catch (err: any) {
-          debugInfo += `\n<b>异常:</b> <code>${htmlEscape(err?.message || String(err))}</code>`;
-          await sendLongMessage(msg, `❌ <b>错误:</b> 上传失败\n${debugInfo}`);
+          await sendLongMessage(msg, `❌ <b>错误:</b> 上传失败 — ${htmlEscape(err?.message || String(err))}`);
         }
       } catch (error: any) {
         if (error.message?.includes("FLOOD_WAIT")) {
           const waitTime = parseInt(error.message.match(/\d+/)?.[0] || "60");
-          await new Promise(res => setTimeout(res, (waitTime + 1) * 1000));
+          const lifecycle = tryGetCurrentGenerationContext();
+          if (lifecycle) {
+            await lifecycle.delay((waitTime + 1) * 1000, { label: "oxost:flood-wait" });
+          } else {
+            await new Promise(res => setTimeout(res, (waitTime + 1) * 1000));
+          }
         }
         await sendLongMessage(msg, `❌ <b>错误:</b> ${htmlEscape(error.message)}`);
       }

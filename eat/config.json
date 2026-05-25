@@ -24,6 +24,16 @@
         "mask": "eat/maskat.png"
       }
     },
+    "az": {
+      "name": "按住",
+      "url": "eat/eataz.png",
+      "you": {
+        "x": -17,
+        "y": 250,
+        "rotate": -90,
+        "mask": "eat/maskaz.png"
+      }
+    },
     "bc": {
       "name": "鞭笞",
       "url": "eat/eatbc.png",
@@ -148,6 +158,15 @@
         "x": 770,
         "y": 100,
         "mask": "eat/maskhy2.png"
+      }
+    },
+    "jgw": {
+      "name": "凭什么就你们有龟壳",
+      "url": "eat/eatjgw.png",
+      "you": {
+        "x": 237,
+        "y": 69,
+        "mask": "eat/maskjgw.png"
       }
     },
     "kf": {
@@ -357,6 +376,30 @@
         "x": 55,
         "y": 52,
         "mask": "eat/maskyuyu.png"
+      }
+    },
+    "bsdw": {
+      "name": "搬史大王",
+      "url": "eat/eatbsdw.png",
+      "me": {
+        "x": 270,
+        "y": 170,
+        "mask": "eat/maskbsdw.png"
+      },
+      "you": {
+        "x": 50,
+        "y": 240,
+        "mask": "eat/maskbsdw.png"
+      }
+    },
+    "tuzai": {
+      "name": "屠宰",
+      "url": "eat/eattuzai.png",
+      "stamp": {
+        "size": 512,
+        "scale": 0.9,
+        "rotate": -12,
+        "opacity": 0.6
       }
     }
   }

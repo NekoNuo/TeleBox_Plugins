@@ -1,6 +1,6 @@
 
 import { Plugin } from "@utils/pluginBase";
-import { Api } from "telegram";
+import { Api } from "teleproto";
 import { getPrefixes } from "@utils/pluginManager";
 import { JSONFilePreset } from "lowdb/node";
 import * as path from "path";
@@ -191,7 +191,7 @@ class GitManagerPlugin extends Plugin {
 
   private async handleLogin(msg: Api.Message, args: string[]) {
     if (args.length < 3) {
-      await msg.edit({ text: `❌ <b>参数不足</b>\n\n<b>格式:</b> <code>${mainPrefix}${pluginName} login &lt;邮箱&gt; &lt;用户名&gt; &lt;Token&gt;</code>`, parseMode: "html" });
+        await msg.edit({ text: `❌ <b>参数不足</b>\n\n<b>格式:</b> <code>${mainPrefix}${pluginName} login &lt;邮箱&gt; &lt;用户名&gt; &lt;Token&gt;</code>`, parseMode: "html" });
       return;
     }
 

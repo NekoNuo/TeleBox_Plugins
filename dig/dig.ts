@@ -1,5 +1,5 @@
 import { Plugin } from "@utils/pluginBase";
-import { Api } from "telegram";
+import { Api } from "teleproto";
 import { exec } from "child_process";
 import util from "util";
 import axios from "axios";
@@ -434,6 +434,7 @@ const dig = async (msg: Api.Message) => {
 };
 
 class DigPlugin extends Plugin {
+
   description: string = `调用系统 dig 命令进行查询并显示 IP 归属地及 ASN`;
   cmdHandlers: Record<string, (msg: Api.Message) => Promise<void>> = {
     dig,

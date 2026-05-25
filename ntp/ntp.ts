@@ -1,11 +1,20 @@
 import { getPrefixes } from "@utils/pluginManager";
 import { Plugin } from "@utils/pluginBase";
-import { Api } from "telegram";
+import { Api } from "teleproto";
 import * as dgram from "dgram";
 import { execFile } from "child_process";
 import { promisify } from "util";
 
 const execFileAsync = promisify(execFile);
+
+const htmlEscape = (text: string): string =>
+  text.replace(/[&<>"']/g, (m) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#x27;",
+  }[m] || m));
 
 const prefixes = getPrefixes();
 const mainPrefix = prefixes[0];
@@ -244,7 +253,7 @@ class NtpPlugin extends Plugin {
           const now = Date.now();
           const lines = [
             `🕒 NTP 查询完成`,
-            `• 服务器: <code>${result.server}</code>${result.ip ? ` (${result.ip})` : ""}`,
+            `• 服务器: <code>${htmlEscape(result.server)}</code>${result.ip ? ` (${htmlEscape(result.ip)})` : ""}`,
             `• 分层: <code>${result.stratum ?? "-"}</code>`,
             `• 往返延迟: <code>${fmtMs(result.delayMs)}</code>`,
             `• 本地相对偏移: <code>${fmtMs(result.offsetMs)}</code>`,
@@ -257,7 +266,7 @@ class NtpPlugin extends Plugin {
           ].filter(Boolean);
           await msg.edit({ text: lines.join("\n"), parseMode: "html" });
         } catch (e: any) {
-          await msg.edit({ text: `❌ 查询失败：${e?.message || e}` });
+          await msg.edit({ text: `❌ 查询失败：${htmlEscape(String(e?.message || e))}`, parseMode: "html" });
         }
         return;
       }
@@ -275,7 +284,7 @@ class NtpPlugin extends Plugin {
           const beforeOffset = result.offsetMs ?? result.serverTimeMs - now;
           const header = [
             `🔧 NTP 对时`,
-            `• 服务器: <code>${result.server}</code>${result.ip ? ` (${result.ip})` : ""}`,
+            `• 服务器: <code>${htmlEscape(result.server)}</code>${result.ip ? ` (${htmlEscape(result.ip)})` : ""}`,
             `• 估算偏移: <code>${fmtMs(beforeOffset)}</code>`,
             `• 往返延迟: <code>${fmtMs(result.delayMs)}</code>`,
           ].join("\n");
@@ -286,12 +295,12 @@ class NtpPlugin extends Plugin {
             await msg.edit({
               text:
                 header +
-                `\n• 已尝试设置系统时间：<code>${setRes.command}</code>` +
-                (setRes.stdout ? `\n<pre>${(setRes.stdout || "").trim()}</pre>` : ""),
+                `\n• 已尝试设置系统时间：<code>${htmlEscape(setRes.command || "")}</code>` +
+                (setRes.stdout ? `\n<pre>${htmlEscape((setRes.stdout || "").trim())}</pre>` : ""),
               parseMode: "html",
             });
           } else {
-            const hint = setRes.hint || "无法设置系统时间。";
+            const hint = htmlEscape(setRes.hint || "无法设置系统时间。");
             await msg.edit({
               text:
                 header +
@@ -303,7 +312,7 @@ class NtpPlugin extends Plugin {
             });
           }
         } catch (e: any) {
-          await msg.edit({ text: `❌ 对时失败：${e?.message || e}` });
+          await msg.edit({ text: `❌ 对时失败：${htmlEscape(String(e?.message || e))}`, parseMode: "html" });
         }
         return;
       }

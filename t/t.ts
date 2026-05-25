@@ -1,11 +1,17 @@
 import { Plugin } from "@utils/pluginBase";
-import { Api } from "telegram";
+import { getPrefixes } from "@utils/pluginManager";
+import { Api } from "teleproto";
 import * as fs from "fs/promises";
 import axios from "axios";
 import { exec } from "child_process";
 import { promisify } from "util";
 import path from "path";
 import { createDirectoryInAssets } from "@utils/pathHelpers";
+import { safeGetReplyMessage } from "@utils/safeGetMessages";
+
+const prefixes = getPrefixes();
+const mainPrefix = prefixes[0];
+
 
 const execPromise = promisify(exec);
 const DATA_FILE_NAME = "tts_data.json";
@@ -222,7 +228,7 @@ async function tts(msg: Api.Message) {
   const userData = await loadUserData();
   const cfg = userData.users[userId];
   if (!cfg || !cfg.apiKey) {
-    await msg.edit({ text: "❌ 请先设置 API Key (.tk)" });
+    await msg.edit({ text: "❌ 请先设置 API Key (${mainPrefix}tk)" });
     return;
   }
 
@@ -248,7 +254,7 @@ async function tts(msg: Api.Message) {
     const cover = userData.covers?.[cfg.defaultRole];
 
     // 优先被你回复的那条消息
-    const rep = msg.replyTo?.replyToMsgId ? await msg.getReplyMessage() : null;
+    const rep = msg.replyTo?.replyToMsgId ? await safeGetReplyMessage(msg) : null;
     const replyToId = rep?.id ?? msg.id;
 
     const file = await generateMusic(cleanTextForTTS(text), cfg.defaultRoleId, cfg.apiKey, { title, artist, album, cover });
@@ -277,7 +283,7 @@ async function tts(msg: Api.Message) {
   let text = parts.join(" ");
   let replyToId = msg.id;
   if (msg.replyTo?.replyToMsgId) {
-    const rep = await msg.getReplyMessage();
+    const rep = await safeGetReplyMessage(msg);
     if (rep?.text) text = text || rep.text;
     if (rep?.id) replyToId = rep.id;
   }
@@ -393,6 +399,7 @@ async function setApiKey(msg: Api.Message) {
 }
 
 class TTSPlugin extends Plugin {
+
   description = `
 🚀 <b>文字转语音/音乐插件</b>
 • <code>.t 文本</code> - 普通语音（发送后自动删命令）
@@ -401,7 +408,7 @@ class TTSPlugin extends Plugin {
 • <code>.ts [页码]</code> - 分页查看角色列表（默认每页 20）
 • <code>.ts 角色名</code> - 切换角色
 • <code>.ts 角色名 角色ID</code> - 新增/更新并切换为默认
-• <code>.tk APIKey</code> - 设置 API Key
+• <code>${mainPrefix}tk APIKey</code> - 设置 API Key
 • 第一次需要申请 Fish API Key: https://fish.audio/
 • 更多角色选择请查看: https://fish.audio/zh-CN/app/discovery/
 `;

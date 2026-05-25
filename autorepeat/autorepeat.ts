@@ -1,10 +1,24 @@
 import { Plugin } from "@utils/pluginBase";
+import { getPrefixes } from "@utils/pluginManager";
 import { getGlobalClient } from "@utils/globalClient";
 import { createDirectoryInAssets } from "@utils/pathHelpers";
-import { Api, TelegramClient, utils } from "telegram";
+import { Api, TelegramClient, utils } from "teleproto";
 import { Low } from "lowdb";
 import { JSONFile } from "lowdb/node";
 import path from "path";
+import { safeGetReplyMessage } from "@utils/safeGetMessages";
+
+const prefixes = getPrefixes();
+const mainPrefix = prefixes[0];
+
+function htmlEscape(text: string): string {
+  return String(text)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#x27;");
+}
 
 // ==================== 配置常量 ====================
 const CONFIG = {
@@ -16,7 +30,7 @@ const CONFIG = {
 const HELP_TEXT = `<b>自动复读插件使用说明</b>
 
 <b>指令列表：</b>
-<code>.autorepeat on / off</code> - 在群组中使用，开启 / 关闭 当前群组
+<code>${mainPrefix}autorepeat on/off</code> - 在群组中使用，开启 / 关闭 当前群组
 <code>.autorepeat on / off [群组ID / @群组名 / https://t.me/群组名]</code> - 开启指定群组
 <code>.autorepeat allon</code> - 开启全部群组自动复读
 <code>.autorepeat alloff</code> - 关闭全部群组自动复读
@@ -25,13 +39,31 @@ const HELP_TEXT = `<b>自动复读插件使用说明</b>
 <code>.autorepeat</code> - 查看当前群组状态
 
 <b>高级用法：</b>
-• 从目标群组转发消息，回复该消息使用 <code>.autorepeat on</code> 可开启该群组
+• 从目标群组转发消息后，回复该消息并使用 <code>${mainPrefix}autorepeat on/off</code> 可切换该群组状态
 
 <b>复读规则：</b>
 • <b>触发条件</b>：默认5分钟内有5位不同用户发送完全相同的内容
 • <b>每日限制</b>：同一群组内，相同内容每天只会自动复读一次 (UTC+8 0点重置)
 • <b>忽略规则</b>：匿名消息、非文本消息、自己发送的消息、机器人消息会被忽略
 `;
+
+async function getAllManageableGroupIds(client: TelegramClient): Promise<number[]> {
+  const dialogsById = new Map<number, any>();
+
+  const collectDialogs = async (params: Record<string, any>) => {
+    const dialogs = await client.getDialogs(params);
+    for (const dialog of dialogs || []) {
+      if (dialog.isGroup || (dialog.isChannel && (dialog.entity as any)?.megagroup)) {
+        dialogsById.set(Number(dialog.id), dialog);
+      }
+    }
+  };
+
+  await collectDialogs({});
+  await collectDialogs({ folderId: 1 });
+
+  return Array.from(dialogsById.keys());
+}
 
 // ==================== 缓存管理器 ====================
 type CacheData = {
@@ -98,17 +130,30 @@ class CacheManager {
   }
 }
 
+// ==================== Timer tracking for safe cleanup ====================
+const pendingTimers = new Set<ReturnType<typeof setTimeout>>();
+
+function trackTimer(timer: ReturnType<typeof setTimeout>): ReturnType<typeof setTimeout> {
+  pendingTimers.add(timer);
+  return timer;
+}
+
+function clearTrackedTimer(timer: ReturnType<typeof setTimeout>): void {
+  clearTimeout(timer);
+  pendingTimers.delete(timer);
+}
+
 // ==================== 消息管理器 ====================
 class MessageManager {
   static async smartEdit(
-    message: Api.Message,
+    message: Api.Message | undefined,
     text: string,
     deleteAfter: number = CONFIG.MESSAGE_AUTO_DELETE,
     parseMode: "html" | "md" = "html"
-  ): Promise<Api.Message> {
+  ): Promise<Api.Message | undefined> {
     try {
       const client = await getGlobalClient();
-      if (!client) return message;
+      if (!client || !message) return message;
 
       await client.editMessage(message.peerId, {
         message: message.id,
@@ -118,7 +163,8 @@ class MessageManager {
       });
 
       if (deleteAfter > 0) {
-        setTimeout(async () => {
+        const timer = setTimeout(async () => {
+          clearTrackedTimer(timer);
           try {
             await client.deleteMessages(message.peerId, [message.id], {
               revoke: true,
@@ -127,6 +173,7 @@ class MessageManager {
             console.error(`删除消息失败: ${e}`);
           }
         }, deleteAfter * 1000);
+        trackTimer(timer);
       }
 
       return message;
@@ -199,7 +246,10 @@ class AutoRepeatManager {
       }
       if (data.daily_history) {
         for (const [gidStr, hashes] of Object.entries(data.daily_history)) {
-          this.dailyHistory.set(Number(gidStr), new Set(hashes));
+          const gid = Number(gidStr);
+          if (!Number.isNaN(gid)) {
+            this.dailyHistory.set(gid, new Set(hashes));
+          }
         }
       }
       if (data.trigger_config) {
@@ -361,6 +411,14 @@ class AutoRepeatManager {
       this.saveDailyHistory(); // 保存新的天数和空的记录
     }
   }
+
+  static cleanup(): void {
+    this.recentMessages.clear();
+    this.dailyHistory.clear();
+    this.enabledGroups.clear();
+    this.lastCleanup = 0;
+    this.lastDayCheck = 0;
+  }
 }
 
 // 初始化
@@ -405,7 +463,7 @@ class CommandHandlers {
       // 1. 如果有回复消息，尝试从转发信息中获取
       if (message.replyTo) {
         try {
-          const repliedMsg = await message.getReplyMessage();
+          const repliedMsg = await safeGetReplyMessage(message);
           if (repliedMsg && repliedMsg.fwdFrom) {
             const fwdChatId = repliedMsg.fwdFrom.fromId;
             if (fwdChatId) {
@@ -463,10 +521,12 @@ class CommandHandlers {
               title: entity.title || `群组 ${chatId}`
             };
           } catch (e) {
-            return {
-              success: false,
-              error: `❌ 无法访问群组 ${identifier}\n请确保:\n1. 群组ID正确\n2. 你在该群组中\n3. 已经在该群组中发送过消息`
-            };
+              const safeIdentifier = htmlEscape(identifier);
+              return {
+                success: false,
+                error: `❌ 无法访问群组 ${safeIdentifier}\n请确保:\n1. 群组ID正确\n2. 你在该群组中\n3. 已经在该群组中发送过消息`
+              };
+
           }
         }
       }
@@ -493,10 +553,12 @@ class CommandHandlers {
             };
           }
         } catch (e: any) {
-          return {
-            success: false,
-            error: `❌ 无法找到群组 ${identifier}\n可能原因:\n1. 群组不是公开群组\n2. 用户名或链接错误\n3. 你不在该群组中\n\n建议使用群组ID或在群组中直接使用命令`
-          };
+            const safeIdentifier = htmlEscape(identifier);
+            return {
+              success: false,
+              error: `❌ 无法找到群组 ${safeIdentifier}\n可能原因:\n1. 群组不是公开群组\n2. 用户名或链接错误\n3. 你不在该群组中\n\n建议使用群组ID或在群组中直接使用命令`
+            };
+
         }
       }
 
@@ -506,9 +568,10 @@ class CommandHandlers {
       };
 
     } catch (e: any) {
+      const errorMessage = htmlEscape(e.message || '未知错误');
       return {
         success: false,
-        error: `❌ 解析失败: ${e.message || '未知错误'}`
+        error: `❌ 解析失败: ${errorMessage}`
       };
     }
   }
@@ -526,14 +589,7 @@ class CommandHandlers {
       // .autorepeat allon - 开启全部群组
       if (action === "allon") {
         await MessageManager.smartEdit(message, "🔄 正在扫描所有群组...", 0);
-        const dialogs = await client.getDialogs();
-        const groupIds: number[] = [];
-
-        for (const dialog of dialogs) {
-          if (dialog.isGroup || (dialog.isChannel && (dialog.entity as any)?.megagroup)) {
-            groupIds.push(Number(dialog.id));
-          }
-        }
+        const groupIds = await getAllManageableGroupIds(client);
         await AutoRepeatManager.enableAll(groupIds);
         await MessageManager.smartEdit(message, `✅ 已开启 ${groupIds.length} 个群组的自动复读`);
         return;
@@ -566,8 +622,9 @@ class CommandHandlers {
         for (const gid of pageGroups) {
           try {
             const entity: any = await client.getEntity(gid);
-            const title = entity.title || "Unknown Group";
-            lines.push(`• <b>${title}</b> (<code>${gid}</code>)`);
+                const title = htmlEscape(entity.title || "Unknown Group");
+                lines.push(`• <b>${title}</b> (<code>${gid}</code>)`);
+
           } catch (e) {
             lines.push(`• <code>${gid}</code> (无法获取信息)`);
           }
@@ -610,12 +667,13 @@ class CommandHandlers {
         const result = await this.parseGroupIdentifier(client, message, identifier);
         
         if (!result.success) {
-          await MessageManager.smartEdit(message, result.error!);
+          await MessageManager.smartEdit(message, result.error || "操作失败");
           return;
         }
 
         await AutoRepeatManager.toggleGroup(result.chatId!, true);
-        await MessageManager.smartEdit(message, `✅ 已开启 <b>${result.title}</b> 的自动复读`, 3);
+          await MessageManager.smartEdit(message, `✅ 已开启 <b>${htmlEscape(result.title || "")}</b> 的自动复读`, 3);
+
         return;
       }
 
@@ -625,12 +683,13 @@ class CommandHandlers {
         const result = await this.parseGroupIdentifier(client, message, identifier);
         
         if (!result.success) {
-          await MessageManager.smartEdit(message, result.error!);
+          await MessageManager.smartEdit(message, result.error || "操作失败");
           return;
         }
 
         await AutoRepeatManager.toggleGroup(result.chatId!, false);
-        await MessageManager.smartEdit(message, `❌ 已关闭 <b>${result.title}</b> 的自动复读`, 3);
+          await MessageManager.smartEdit(message, `❌ 已关闭 <b>${htmlEscape(result.title || "")}</b> 的自动复读`, 3);
+
         return;
       }
 
@@ -639,26 +698,37 @@ class CommandHandlers {
       if (result.success) {
         const status = AutoRepeatManager.isEnabled(result.chatId!) ? "✅ 已开启" : "❌ 已关闭";
         const config = AutoRepeatManager.getTriggerConfig();
-        await MessageManager.smartEdit(
-          message,
-          `🤖 <b>${result.title}</b>\n` +
-          `群组ID: <code>${result.chatId}</code>\n` +
-          `状态: ${status}\n` +
-          `触发条件: ${config.timeWindow}秒内${config.minUsers}人`
-        );
+          const safeTitle = htmlEscape(result.title || "");
+          await MessageManager.smartEdit(
+            message,
+            `🤖 <b>${safeTitle}</b>\n` +
+            `群组ID: <code>${result.chatId}</code>\n` +
+            `状态: ${status}\n` +
+            `触发条件: ${config.timeWindow}秒内${config.minUsers}人`
+          );
+
       } else {
         // 默认显示帮助
         await MessageManager.smartEdit(message, HELP_TEXT);
       }
 
     } catch (e: any) {
-      await MessageManager.smartEdit(message, `❌ 操作失败: ${e.message}`);
+      const errorMessage = htmlEscape(e.message || "未知错误");
+      await MessageManager.smartEdit(message, `❌ 操作失败: ${errorMessage}`);
     }
   }
 }
 
 // ==================== 插件主类 ====================
-class AutoRepeatPlugin extends Plugin {  // 修改类名
+class AutoRepeatPlugin extends Plugin {
+  cleanup(): void {
+    for (const timer of pendingTimers) {
+      clearTimeout(timer);
+    }
+    pendingTimers.clear();
+    AutoRepeatManager.cleanup();
+  }
+  // 修改类名
   description: string = HELP_TEXT;
 
   cmdHandlers: Record<string, (msg: Api.Message) => Promise<void>> = {
@@ -673,15 +743,20 @@ class AutoRepeatPlugin extends Plugin {  // 修改类名
   };
 
   listenMessageHandler = async (msg: Api.Message) => {
+    if (!msg) return;
+
+    const msgDate = Number((msg as any).date);
+    if (!Number.isFinite(msgDate) || msgDate <= 0) return;
+
     // 忽略之前的旧消息（只处理实时消息）
-    if (Date.now() / 1000 - msg.date > 60) return;
+    if (Date.now() / 1000 - msgDate > 60) return;
 
     // 忽略自己发送的消息
     if (msg.out) return;
 
     // 忽略其他机器人发送的消息
-    // 注意: GramJS 的 msg.sender 可能是 User 或 Chat，需要检查
     const sender = await msg.getSender();
+    if (!sender) return;
     if (sender instanceof Api.User && sender.bot) {
       return;
     }

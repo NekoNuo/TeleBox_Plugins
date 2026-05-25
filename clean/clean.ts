@@ -1,8 +1,13 @@
+import { safeGetMe } from "@utils/authGuards";
 // file name: clean.ts
 import { Plugin } from "@utils/pluginBase";
-import { Api } from "telegram";
+import { Api } from "teleproto";
 import { getGlobalClient } from "@utils/globalClient";
+import { getPrefixes } from "@utils/pluginManager";
 import { banUser, getBannedUsers, unbanUser } from "@utils/banUtils";
+
+const prefixes = getPrefixes();
+const mainPrefix = prefixes[0];
 
 // HTML 转义函数（必需）
 const htmlEscape = (text: string): string => 
@@ -26,21 +31,20 @@ const HELP_TEXT = `🧹 <b>清理工具 Pro</b>
 <b>🔧 命令列表:</b>
 
 <u>删除账号清理:</u>
-• <code>.clean deleted pm</code> - 扫描私聊中的已注销账号
-• <code>.clean deleted pm rm</code> - 扫描并删除已注销账号的私聊
-• <code>.clean deleted member</code> - 扫描群组中的已注销账号
-• <code>.clean deleted member rm</code> - 扫描并清理群组已注销账号
+• <code>${mainPrefix}clean deleted pm</code> - 扫描私聊中的已注销账号
+• <code>${mainPrefix}clean deleted pm rm</code> - 扫描并删除已注销账号的私聊
+• <code>${mainPrefix}clean deleted member</code> - 扫描群组中的已注销账号
+• <code>${mainPrefix}clean deleted member rm</code> - 扫描并清理群组已注销账号
 
 <u>拉黑用户清理:</u>
-• <code>.clean blocked pm</code> - 清理拉黑用户（智能模式）
-• <code>.clean blocked pm all</code> - 清理所有拉黑用户（全量模式）
+• <code>${mainPrefix}clean blocked pm</code> - 清理拉黑用户（智能模式）
+• <code>${mainPrefix}clean blocked pm all</code> - 清理所有拉黑用户（全量模式）
 
 <u>被封禁实体解封:</u>
-• <code>.clean blocked member</code> - 解封自己封禁的实体
-• <code>.clean blocked member all</code> - 解封所有被封禁的实体
+• <code>${mainPrefix}clean blocked member</code> - 解封自己封禁的实体
+• <code>${mainPrefix}clean blocked member all</code> - 解封所有被封禁的实体
 
 <u>帮助信息:</u>
-• <code>.clean help</code> - 显示此帮助信息
 
 <b>⚡ 智能清理模式:</b>
 • 跳过机器人、诈骗账户、虚假账户
@@ -58,6 +62,7 @@ const HELP_TEXT = `🧹 <b>清理工具 Pro</b>
 • 私聊清理仅操作机器人自身对话`;
 
 class CleanPlugin extends Plugin {
+
   // 插件配置
   private readonly PLUGIN_NAME = "clean";
   private readonly PLUGIN_VERSION = "2.0.0";
@@ -68,7 +73,7 @@ class CleanPlugin extends Plugin {
   private blockedCleanupStartTime: number = 0;
   
   // 命令处理器
-  private cmdHandlers: { [key: string]: (msg: Api.Message) => Promise<void> };
+  cmdHandlers: { [key: string]: (msg: Api.Message) => Promise<void> };
 
   constructor() {
     super();
@@ -239,7 +244,7 @@ class CleanPlugin extends Plugin {
         }
         
         if (!deleteDialogs) {
-          result += `\n💡 使用 <code>.clean deleted pm rm</code> 直接移除这些对话`;
+          result += `\n💡 使用 <code>${mainPrefix}clean deleted pm rm</code> 直接移除这些对话`;
         }
       }
 
@@ -311,7 +316,7 @@ class CleanPlugin extends Plugin {
       }
       
       if (!cleanMembers) {
-        result += `\n💡 使用 <code>.clean deleted member rm</code> 清理这些已注销账号`;
+        result += `\n💡 使用 <code>${mainPrefix}clean deleted member rm</code> 清理这些已注销账号`;
       }
     }
 
@@ -408,7 +413,8 @@ class CleanPlugin extends Plugin {
 
     await this.editMessage(msg, "🔓 正在获取被封禁实体列表...");
 
-    const me = await client.getMe();
+    const me = await safeGetMe(client);
+      if (!me) return false;
     const myId = Number(me.id);
     const chatEntity = msg.peerId;
     
@@ -592,7 +598,8 @@ ${skipped > 0 ? `• 跳过原因: ${includeAll ? '系统限制' : '机器人/�
 
   private async checkBanPermission(client: any, chatId: any): Promise<boolean> {
     try {
-      const me = await client.getMe();
+      const me = await safeGetMe(client);
+      if (!me) return;
       
       let participant;
       if (chatId instanceof Api.Channel) {

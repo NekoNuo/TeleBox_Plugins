@@ -1,6 +1,6 @@
 import { getPrefixes } from "@utils/pluginManager";
 import { Plugin } from "@utils/pluginBase";
-import { Api } from "telegram";
+import { Api } from "teleproto";
 import { getGlobalClient } from "@utils/globalClient";
 
 // 获取命令前缀
@@ -38,7 +38,21 @@ const help_text = `👮 <b>一键 AT 管理员</b>
 • 自动删除召唤命令消息
 • 支持回复消息时召唤管理员`;
 
+// Timer tracking for safe cleanup
+const pendingTimers = new Set<ReturnType<typeof setTimeout>>();
+
+function scheduleTimer(fn: () => void, ms: number): ReturnType<typeof setTimeout> {
+  const t = setTimeout(() => {
+    pendingTimers.delete(t);
+    fn();
+  }, ms);
+  pendingTimers.add(t);
+  return t;
+}
+
+
 class AtAdminsPlugin extends Plugin {
+
   description: string = help_text;
   
   cmdHandlers: Record<string, (msg: Api.Message, trigger?: Api.Message) => Promise<void>> = {
@@ -171,7 +185,7 @@ class AtAdminsPlugin extends Plugin {
       }
 
       // 延迟删除命令消息
-      setTimeout(async () => {
+      scheduleTimer(async () => {
         try {
           await msg.delete({ revoke: true });
         } catch (deleteError) {
@@ -201,6 +215,12 @@ class AtAdminsPlugin extends Plugin {
         parseMode: "html"
       });
     }
+  }
+  cleanup(): void {
+    for (const timer of pendingTimers) {
+      clearTimeout(timer);
+    }
+    pendingTimers.clear();
   }
 }
 

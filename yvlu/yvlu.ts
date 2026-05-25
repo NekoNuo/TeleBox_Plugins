@@ -1,10 +1,11 @@
+import { safeGetMe } from "@utils/authGuards";
 // YVLU Plugin - 生成文字语录贴纸
 //@ts-nocheck
 import axios from "axios";
 import _ from "lodash";
 import { getPrefixes } from "@utils/pluginManager";
 import { Plugin } from "@utils/pluginBase";
-import { Api } from "telegram";
+import { Api } from "teleproto";
 import {
   createDirectoryInAssets,
   createDirectoryInTemp,
@@ -20,9 +21,10 @@ import {
   dealCommandPluginWithMessage,
   getCommandFromMessage,
 } from "@utils/pluginManager";
-import { sleep } from "telegram/Helpers";
+import { sleep } from "teleproto/Helpers";
+import { safeGetReplyMessage, safeGetMessages } from "@utils/safeGetMessages";
 import dayjs from "dayjs";
-import { CustomFile } from "telegram/client/uploads.js";
+import { CustomFile } from "teleproto/client/uploads.js";
 import * as zlib from "zlib";
 import { execFile } from "child_process";
 import { promisify } from "util";
@@ -30,6 +32,7 @@ import { promisify } from "util";
 const execFileAsync = promisify(execFile);
 
 const timeout = 60000; // 超时
+const PYTHON_PATH = "python3"; // Python 路径，可修改为 venv 中的路径，如："/path/to/venv/bin/python"
 
 const hashCode = (s: any) => {
   const l = s.length;
@@ -68,7 +71,7 @@ async function checkTgsDependencies(): Promise<{
   message: string;
 }> {
   try {
-    await execFileAsync("python3", [
+    await execFileAsync(PYTHON_PATH, [
       "-c",
       "from rlottie_python import LottieAnimation",
     ]);
@@ -105,12 +108,13 @@ async function convertTgsToWebm(tgsBuffer: Buffer): Promise<Buffer> {
 
     const pythonScript = `
 import sys
+
 from rlottie_python import LottieAnimation
 anim = LottieAnimation.from_tgs(sys.argv[1])
 anim.save_animation(sys.argv[2])
 `;
 
-    await execFileAsync("python3", ["-c", pythonScript, tgsPath, gifPath]);
+    await execFileAsync(PYTHON_PATH, ["-c", pythonScript, tgsPath, gifPath]);
 
     await execFileAsync("ffmpeg", [
       "-i",
@@ -162,6 +166,53 @@ function isAnimatedWebP(buffer: Buffer): boolean {
     }
   }
   return false;
+}
+// 检测是否为 MP4 格式
+function isMp4Format(buffer: Buffer): boolean {
+  if (!buffer || buffer.length < 12) return false;
+  // MP4 魔数: ftyp 在偏移 4-8
+  const ftyp = buffer.toString("ascii", 4, 8);
+  return ftyp === "ftyp";
+}
+
+// MP4 转 WebM (使用 ffmpeg)
+async function convertMp4ToWebm(mp4Buffer: Buffer): Promise<Buffer> {
+  const os = await import("os");
+  const tmpDir = os.tmpdir();
+  const uniqueId =
+    Date.now().toString() + "_" + Math.random().toString(36).slice(2);
+  const mp4Path = path.join(tmpDir, `video_${uniqueId}.mp4`);
+  const webmPath = path.join(tmpDir, `video_${uniqueId}.webm`);
+
+  try {
+    fs.writeFileSync(mp4Path, mp4Buffer);
+
+    await execFileAsync("ffmpeg", [
+      "-i",
+      mp4Path,
+      "-c:v",
+      "libvpx-vp9",
+      "-pix_fmt",
+      "yuva420p",
+      "-b:v",
+      "400k",
+      "-auto-alt-ref",
+      "0",
+      "-an",
+      "-y",
+      webmPath,
+    ]);
+
+    const webmBuffer = fs.readFileSync(webmPath);
+    return webmBuffer;
+  } finally {
+    try {
+      fs.unlinkSync(mp4Path);
+    } catch (e) {}
+    try {
+      fs.unlinkSync(webmPath);
+    } catch (e) {}
+  }
 }
 
 // 读取WebP图片尺寸的辅助函数
@@ -220,6 +271,17 @@ function getWebPDimensions(imageBuffer: any): {
   }
 }
 
+const htmlEscape = (text: string): string =>
+  text.replace(/[&<>"']/g, (m) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#x27;",
+  }[m] || m));
+
+const codeTag = (text: string): string => `<code>${htmlEscape(text)}</code>`;
+
 const getPeerNumericId = (peer?: Api.TypePeer): number | undefined => {
   if (!peer) return undefined;
   if (peer instanceof Api.PeerUser) return peer.userId;
@@ -230,7 +292,7 @@ const getPeerNumericId = (peer?: Api.TypePeer): number | undefined => {
 
 const resolveForwardSenderFromHeader = async (
   forwardHeader: Api.MessageFwdHeader,
-  client: any
+  client: any,
 ) => {
   if (!forwardHeader) return undefined;
 
@@ -266,7 +328,7 @@ const resolveForwardSenderFromHeader = async (
       getPeerNumericId(
         forwardHeader.fromId ||
           forwardHeader.savedFromId ||
-          forwardHeader.savedFromPeer
+          forwardHeader.savedFromPeer,
       ) || hashCode(fallbackName),
     firstName: fallbackName,
     lastName: "",
@@ -367,7 +429,7 @@ function convertEntities(entities: Api.TypeMessageEntity[]): any[] {
 
 // 调用quote-api生成语录
 async function generateQuote(
-  quoteData: any
+  quoteData: any,
 ): Promise<{ buffer: Buffer; ext: string }> {
   try {
     const response = await axios({
@@ -378,8 +440,8 @@ async function generateQuote(
       ...JSON.parse(
         Buffer.from(
           "eyJ1cmwiOiJodHRwczovL3F1b3RlLWFwaS1lbmhhbmNlZC56aGV0ZW5nc2hhLmV1Lm9yZy9nZW5lcmF0ZS53ZWJwIiwiaGVhZGVycyI6eyJDb250ZW50LVR5cGUiOiJhcHBsaWNhdGlvbi9qc29uIiwiVXNlci1BZ2VudCI6IlRlbGVCb3gvMC4yLjEifX0=",
-          "base64"
-        ).toString("utf-8")
+          "base64",
+        ).toString("utf-8"),
       ),
     });
 
@@ -438,6 +500,7 @@ interface YvluConfig {
 }
 
 class YvluPlugin extends Plugin {
+
   description: string = `\n生成文字语录贴纸\n\n${help_text}`;
   private config: YvluConfig | null = null;
   private configPath: string = "";
@@ -459,7 +522,7 @@ class YvluPlugin extends Plugin {
       fs.writeFileSync(
         this.configPath,
         JSON.stringify(defaultConfig, null, 2),
-        "utf-8"
+        "utf-8",
       );
       console.log(`已创建默认配置文件: ${this.configPath}`);
     }
@@ -528,7 +591,7 @@ class YvluPlugin extends Plugin {
         // 处理保存贴纸/图片到贴纸包的逻辑
         await this.handleSaveStickerToSet(msg);
       } else if (valid) {
-        let replied = await msg.getReplyMessage();
+        let replied = await safeGetReplyMessage(msg);
         if (!replied) {
           await msg.edit({ text: "请回复一条消息" });
           return;
@@ -543,7 +606,7 @@ class YvluPlugin extends Plugin {
         try {
           const client = await getGlobalClient();
 
-          const messages = await msg.client?.getMessages(replied?.peerId, {
+          const messages = await safeGetMessages(msg.client, replied.peerId, {
             offsetId: replied!.id - 1,
             limit: count,
             reverse: true,
@@ -589,7 +652,7 @@ class YvluPlugin extends Plugin {
               if (!forwardedSender) {
                 forwardedSender = await resolveForwardSenderFromHeader(
                   message.fwdFrom,
-                  client
+                  client,
                 );
               }
 
@@ -625,7 +688,7 @@ class YvluPlugin extends Plugin {
             const currentUserIdentifier =
               userId ||
               hashCode(
-                name || `${firstName}|${lastName}` || `user_${i}`
+                name || `${firstName}|${lastName}` || `user_${i}`,
               ).toString();
 
             // 判断是否应该显示头像：只有当前用户与上一条消息的用户不同时才显示
@@ -640,7 +703,7 @@ class YvluPlugin extends Plugin {
                   sender as any,
                   {
                     isBig: false,
-                  }
+                  },
                 );
                 if (Buffer.isBuffer(buffer) && buffer.length > 0) {
                   const base64 = buffer.toString("base64");
@@ -679,7 +742,7 @@ class YvluPlugin extends Plugin {
 
                   // 尝试拿到被回复消息以获取发送者名称
                   try {
-                    const repliedMsg = await message.getReplyMessage();
+                    const repliedMsg = await safeGetReplyMessage(message);
                     if (repliedMsg) {
                       const repliedSender = await repliedMsg.getSender();
                       if (repliedSender) {
@@ -712,7 +775,7 @@ class YvluPlugin extends Plugin {
                   replyHeader?.replyToMsgId
                 ) {
                   try {
-                    const repliedMsg = await message.getReplyMessage();
+                    const repliedMsg = await safeGetReplyMessage(message);
                     if (repliedMsg) {
                       const repliedSender = await repliedMsg.getSender();
                       let replyName = "unknown";
@@ -732,7 +795,7 @@ class YvluPlugin extends Plugin {
                       // 使用被回复消息的文本 + 实体
                       const replyText = repliedMsg.message || "";
                       const replyEntities = convertEntities(
-                        repliedMsg.entities || []
+                        repliedMsg.entities || [],
                       );
 
                       if (replyText) {
@@ -763,7 +826,7 @@ class YvluPlugin extends Plugin {
                   (
                     (message.media as Api.MessageMediaDocument).document as any
                   ).attributes?.some(
-                    (a: any) => a instanceof Api.DocumentAttributeSticker
+                    (a: any) => a instanceof Api.DocumentAttributeSticker,
                   );
 
                 if (isSticker) {
@@ -778,16 +841,21 @@ class YvluPlugin extends Plugin {
                 const isTgsSticker =
                   isSticker && mimeType === "application/x-tgsticker";
 
-                // 检测是否为动态贴纸（需要下载原文件，不用缩略图）
-                const isAnimatedSticker =
-                  isSticker &&
-                  (mimeType === "video/webm" || // 视频贴纸
-                    mimeType === "image/webp" || // 可能是动态WebP
-                    isTgsSticker); // TGS 动态贴纸
+                // 检测是否为 GIF/MP4 (Telegram 的 GIF 实际是 mp4)
+                const isGifOrMp4 =
+                  mimeType === "video/mp4" || mimeType === "image/gif";
+
+                // 检测是否为动态内容（需要下载原文件，不用缩略图）
+                const isAnimatedContent =
+                  (isSticker &&
+                    (mimeType === "video/webm" || // 视频贴纸
+                      mimeType === "image/webp" || // 可能是动态WebP
+                      isTgsSticker)) || // TGS 动态贴纸
+                  isGifOrMp4; // GIF/MP4
 
                 const buffer = await (message as any).downloadMedia({
-                  // 动态贴纸不使用缩略图，下载原始文件
-                  ...(isAnimatedSticker ? {} : { thumb: 1 }),
+                  // 动态内容不使用缩略图，下载原始文件
+                  ...(isAnimatedContent ? {} : { thumb: 1 }),
                 });
                 if (Buffer.isBuffer(buffer)) {
                   let finalBuffer = buffer;
@@ -801,16 +869,30 @@ class YvluPlugin extends Plugin {
                         console.error(`[yvlu] ${depCheck.message}`);
                       } else {
                         console.log(
-                          `[yvlu] 检测到 TGS 贴纸，开始转换为 WebM...`
+                          `[yvlu] 检测到 TGS 贴纸，开始转换为 WebM...`,
                         );
                         finalBuffer = await convertTgsToWebm(buffer);
                         finalMime = "video/webm";
                         console.log(
-                          `[yvlu] TGS -> WebM 转换成功，大小: ${finalBuffer.length}`
+                          `[yvlu] TGS -> WebM 转换成功，大小: ${finalBuffer.length}`,
                         );
                       }
                     } catch (convertError) {
                       console.error(`[yvlu] TGS 转换失败:`, convertError);
+                    }
+                  }
+                  // 如果是 MP4/GIF，转换为 WebM
+                  else if (isGifOrMp4 || isMp4Format(buffer)) {
+                    try {
+                      console.log(`[yvlu] 检测到 GIF/MP4，开始转换为 WebM...`);
+                      finalBuffer = await convertMp4ToWebm(buffer);
+                      finalMime = "video/webm";
+                      console.log(
+                        `[yvlu] MP4 -> WebM 转换成功，大小: ${finalBuffer.length}`,
+                      );
+                    } catch (convertError) {
+                      console.error(`[yvlu] MP4 转换失败:`, convertError);
+                      // 转换失败时保持原格式
                     }
                   }
 
@@ -823,7 +905,7 @@ class YvluPlugin extends Plugin {
                   const base64 = finalBuffer.toString("base64");
                   media = { url: `data:${mime};base64,${base64}` };
                   console.log(
-                    `媒体下载: mimeType=${mimeType}, isAnimated=${isAnimatedSticker}, isTgs=${isTgsSticker}, size=${finalBuffer.length}`
+                    `媒体下载: mimeType=${mimeType}, isAnimated=${isAnimatedContent}, isTgs=${isTgsSticker}, isGif=${isGifOrMp4}, size=${finalBuffer.length}`,
                   );
                 }
               }
@@ -878,12 +960,12 @@ class YvluPlugin extends Plugin {
           }
 
           console.log(
-            `[yvlu] API返回: buffer长度=${imageBuffer?.length}, ext=${imageExt}`
+            `[yvlu] API返回: buffer长度=${imageBuffer?.length}, ext=${imageExt}`,
           );
           console.log(
             `[yvlu] buffer前20字节: ${imageBuffer
               ?.slice(0, 20)
-              .toString("hex")}`
+              .toString("hex")}`,
           );
 
           try {
@@ -899,7 +981,7 @@ class YvluPlugin extends Plugin {
                 dimensions.height
               }, 格式: ${isWebm ? "webm" : "webp"}, 动态: ${
                 isWebm || isAnimated
-              }`
+              }`,
             );
 
             if (isWebm) {
@@ -935,7 +1017,7 @@ class YvluPlugin extends Plugin {
                 `sticker.${imageExt}`,
                 imageBuffer.length,
                 "",
-                imageBuffer
+                imageBuffer,
               );
 
               const stickerAttr = new Api.DocumentAttributeSticker({
@@ -965,7 +1047,7 @@ class YvluPlugin extends Plugin {
             console.log("[yvlu] 文件发送成功");
           } catch (fileError) {
             console.error(`发送文件失败: ${fileError}`);
-            await msg.edit({ text: `发送文件失败: ${fileError}` });
+            await msg.edit({ text: `发送文件失败: ${htmlEscape(String(fileError))}`, parseMode: "html" });
             return;
           }
 
@@ -975,7 +1057,7 @@ class YvluPlugin extends Plugin {
           console.log(`语录生成耗时: ${end - start}ms`);
         } catch (error) {
           console.error(`语录生成失败: ${error}`);
-          await msg.edit({ text: `语录生成失败: ${error}` });
+          await msg.edit({ text: `语录生成失败: ${htmlEscape(String(error))}`, parseMode: "html" });
         }
       } else {
         await msg.edit({
@@ -996,17 +1078,16 @@ class YvluPlugin extends Plugin {
         const configInfo = `
 <b>📋 当前配置:</b>
 
-<b>贴纸包名称:</b> <code>${
-          this.config?.stickerSetShortName || "(未设置)"
-        }</code>
+        <b>贴纸包名称:</b> ${codeTag(this.config?.stickerSetShortName || "(未设置)")}
 ${
   this.config?.stickerSetShortName
-    ? `<b>贴纸包链接:</b> t.me/addstickers/${this.config.stickerSetShortName}`
+    ? `<b>贴纸包链接:</b> t.me/addstickers/${htmlEscape(this.config.stickerSetShortName)}`
     : ""
 }
 
 <b>配置文件路径:</b>
-<code>${this.configPath}</code>
+${codeTag(this.configPath)}
+
 
 <b>可用配置命令:</b>
 <code>${commandName} config sticker 贴纸包名称</code> - 设置贴纸包名称
@@ -1060,14 +1141,14 @@ ${
           fs.writeFileSync(
             this.configPath,
             JSON.stringify(newConfig, null, 2),
-            "utf-8"
+            "utf-8",
           );
 
           // 重新加载配置
           await this.loadConfig();
 
           await msg.edit({
-            text: `✅ 贴纸包名称已设置为: <code>${newName}</code>\n贴纸包链接: t.me/addstickers/${newName}`,
+            text: `✅ 贴纸包名称已设置为: ${codeTag(newName)}\n贴纸包链接: t.me/addstickers/${htmlEscape(newName)}`,
             parseMode: "html",
           });
           break;
@@ -1075,14 +1156,15 @@ ${
 
         default:
           await msg.edit({
-            text: `❌ 未知的配置项: <code>${subCommand}</code>\n\n可用配置命令:\n<code>${commandName} config sticker 贴纸包名称</code> - 设置贴纸包名称`,
+            text: `❌ 未知的配置项: ${codeTag(subCommand)}\n\n可用配置命令:\n<code>${commandName} config sticker 贴纸包名称</code> - 设置贴纸包名称`,
             parseMode: "html",
           });
       }
     } catch (error: any) {
       console.error("处理配置命令失败:", error);
       await msg.edit({
-        text: `❌ 配置操作失败: ${error.message || error}`,
+        text: `❌ 配置操作失败: ${htmlEscape(error.message || String(error))}`,
+        parseMode: "html",
       });
     }
   }
@@ -1104,7 +1186,7 @@ ${
           fs.writeFileSync(
             this.configPath,
             JSON.stringify(defaultConfig, null, 2),
-            "utf-8"
+            "utf-8",
           );
           console.log(`已创建默认配置文件: ${this.configPath}`);
         }
@@ -1120,13 +1202,14 @@ ${
         this.config.stickerSetShortName.trim() === ""
       ) {
         await msg.edit({
-          text: `❌ 未配置贴纸包!\n请编辑配置文件: ${this.configPath}\n设置 stickerSetShortName`,
+          text: `❌ 未配置贴纸包!\n请编辑配置文件: ${htmlEscape(this.configPath)}\n设置 stickerSetShortName`,
+          parseMode: "html",
         });
         return;
       }
 
       // 获取回复的消息
-      const replied = await msg.getReplyMessage();
+      const replied = await safeGetReplyMessage(msg);
       if (!replied) {
         await msg.edit({ text: "❌ 请回复一张贴纸或图片" });
         return;
@@ -1149,7 +1232,7 @@ ${
         const doc = replied.media.document as any;
         if (doc && doc.attributes) {
           isSticker = doc.attributes.some(
-            (a: any) => a instanceof Api.DocumentAttributeSticker
+            (a: any) => a instanceof Api.DocumentAttributeSticker,
           );
         }
         if (isSticker && doc.id && doc.accessHash) {
@@ -1177,7 +1260,7 @@ ${
               shortName: this.config.stickerSetShortName,
             }),
             hash: 0,
-          })
+          }),
         );
         stickerSetExists = stickerSet instanceof Api.messages.StickerSet;
       } catch (error: any) {
@@ -1207,16 +1290,18 @@ ${
                 document: documentToAdd,
                 emoji: "📝",
               }),
-            })
+            }),
           );
 
           await msg.edit({
-            text: `✅ 已成功添加到贴纸包!\n贴纸包: t.me/addstickers/${this.config.stickerSetShortName}`,
+            text: `✅ 已成功添加到贴纸包!\n贴纸包: t.me/addstickers/${htmlEscape(this.config.stickerSetShortName)}`,
+            parseMode: "html",
           });
         } catch (error: any) {
           console.error("添加贴纸失败:", error);
           await msg.edit({
-            text: `❌ 添加贴纸失败: ${error.message || error}`,
+            text: `❌ 添加贴纸失败: ${htmlEscape(error.message || String(error))}`,
+            parseMode: "html",
           });
         }
         return;
@@ -1258,16 +1343,18 @@ ${
                 document: file as any,
                 emoji: "📝",
               }),
-            })
+            }),
           );
 
           await msg.edit({
-            text: `✅ 已成功添加到贴纸包!\n贴纸包: t.me/addstickers/${this.config.stickerSetShortName}`,
+            text: `✅ 已成功添加到贴纸包!\n贴纸包: t.me/addstickers/${htmlEscape(this.config.stickerSetShortName)}`,
+            parseMode: "html",
           });
         } catch (error: any) {
           console.error("处理图片失败:", error);
           await msg.edit({
-            text: `❌ 处理图片失败: ${error.message || error}`,
+            text: `❌ 处理图片失败: ${htmlEscape(error.message || String(error))}`,
+            parseMode: "html",
           });
         }
         return;
@@ -1275,7 +1362,8 @@ ${
     } catch (error: any) {
       console.error("保存贴纸到贴纸包失败:", error);
       await msg.edit({
-        text: `❌ 操作失败: ${error.message || error}`,
+        text: `❌ 操作失败: ${htmlEscape(error.message || String(error))}`,
+        parseMode: "html",
       });
     }
   }
@@ -1285,7 +1373,7 @@ ${
     msg: Api.Message,
     replied: Api.Message,
     isSticker: boolean,
-    isPhoto: boolean
+    isPhoto: boolean,
   ) {
     try {
       // 准备第一个贴纸
@@ -1321,7 +1409,8 @@ ${
       }
 
       // 获取当前用户信息
-      const me = await client.getMe();
+      const me = await safeGetMe(client);
+           if (!me) return;
 
       // 创建贴纸包
       await client.invoke(
@@ -1335,18 +1424,20 @@ ${
               emoji: "📝",
             }),
           ],
-        })
+        }),
       );
 
       await msg.edit({
-        text: `✅ 已创建贴纸包并添加第一个贴纸!\n贴纸包: t.me/addstickers/${
+        text: `✅ 已创建贴纸包并添加第一个贴纸!\n贴纸包: t.me/addstickers/${htmlEscape(
           this.config!.stickerSetShortName
-        }`,
+        )}`,
+        parseMode: "html",
       });
     } catch (error: any) {
       console.error("创建贴纸包失败:", error);
       await msg.edit({
-        text: `❌ 创建贴纸包失败: ${error.message || error}`,
+        text: `❌ 创建贴纸包失败: ${htmlEscape(error.message || String(error))}`,
+        parseMode: "html",
       });
     }
   }

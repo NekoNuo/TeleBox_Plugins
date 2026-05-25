@@ -1,6 +1,15 @@
 import { Plugin } from "@utils/pluginBase";
-import { Api, TelegramClient } from "telegram";
+import { Api, TelegramClient } from "teleproto";
+import { safeGetReplyMessage } from "@utils/safeGetMessages";
 
+const htmlEscape = (text: string): string =>
+  text.replace(/[&<>"']/g, (m) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#x27;",
+  }[m] || m));
 
 const gt = async (msg: Api.Message) => {
   let translate: any;
@@ -20,7 +29,7 @@ const gt = async (msg: Api.Message) => {
   } catch (importError: any) {
     console.error("Failed to import translation service:", importError);
     await msg.edit({
-      text: `❌ <b>翻译服务加载失败:</b> ${importError.message || importError}`,
+      text: `❌ <b>翻译服务加载失败:</b> ${htmlEscape(String(importError.message || importError))}`,
       parseMode: "html",
     });
     return;
@@ -63,7 +72,7 @@ const gt = async (msg: Api.Message) => {
     // If no text provided, try to get from replied message
     if (!text.trim()) {
       try {
-        const reply = await msg.getReplyMessage();
+        const reply = await safeGetReplyMessage(msg);
         if (reply && reply.text) {
           text = reply.text.trim();
         } else {
@@ -151,10 +160,10 @@ const gt = async (msg: Api.Message) => {
       text: `🌐 <b>翻译结果</b> (→ ${targetLang})
 
 <b>原文:</b>
-<code>${originalPreview}</code>
+<code>${htmlEscape(originalPreview)}</code>
 
 <b>译文:</b>
-${translated}`,
+${htmlEscape(translated)}`,
       parseMode: "html",
     });
   } catch (error: any) {
@@ -166,18 +175,18 @@ ${translated}`,
         : errorMessage;
 
     await msg.edit({
-      text: `❌ <b>翻译失败:</b> ${displayError}`,
+      text: `❌ <b>翻译失败:</b> ${htmlEscape(displayError)}`,
       parseMode: "html",
     });
   }
 };
 
 class GtPlugin extends Plugin {
+
   description: string = `
 谷歌翻译插件：
 - gt [文本] - 翻译为中文（默认）
 - gt en [文本] - 翻译为英文
-- gt help - 显示帮助信息
 
 也可回复一段消息后使用：
 - gt 或 gt en

@@ -1,6 +1,7 @@
 import { Plugin } from "@utils/pluginBase";
-import { Api } from "telegram";
+import { Api } from "teleproto";
 import axios from "axios";
+import { safeGetReplyMessage } from "@utils/safeGetMessages";
 
 function htmlEscape(text: string): string {
   if (typeof text !== 'string') return '';
@@ -79,7 +80,7 @@ const ip = async (msg: Api.Message) => {
 
     if (!query) {
       try {
-        const reply = await msg.getReplyMessage();
+        const reply = await safeGetReplyMessage(msg);
         if (reply && reply.text) {
           const text = reply.text.trim();
           const ipRegex = /\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b/;
@@ -227,9 +228,10 @@ const ip = async (msg: Api.Message) => {
 };
 
 class IpPlugin extends Plugin {
+
   description: string = `
 IP 查询插件：
-- ip <IP地址/域名> - 查询 IP 地址或域名的详细信息
+- ip &lt;IP地址/域名&gt; - 查询 IP 地址或域名的详细信息
 - 也可回复包含 IP/域名 的消息后使用 ip 命令
 
 示例：

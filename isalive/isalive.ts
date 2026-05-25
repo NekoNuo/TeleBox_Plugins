@@ -1,7 +1,8 @@
 import { getPrefixes } from "@utils/pluginManager";
 import { Plugin } from "@utils/pluginBase";
 import { getGlobalClient } from "@utils/globalClient";
-import { Api } from "telegram";
+import { Api } from "teleproto";
+import { safeGetMessages } from "@utils/safeGetMessages";
 
 const prefixes = getPrefixes();
 const mainPrefix = prefixes[0];
@@ -29,6 +30,10 @@ function htmlEscape(text: string): string {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#x27;");
+}
+
+function codeTag(text: string | number): string {
+  return `<code>${htmlEscape(String(text))}</code>`;
 }
 async function formatEntity(
   target: any,
@@ -269,9 +274,27 @@ async function findUserFromGroups(
   client: any,
   userId: number
 ): Promise<Api.User | null> {
+  const dialogMap = new Map<string, any>();
+
+  const collectDialogs = async (params: Record<string, any>) => {
+    try {
+      const dialogs = await client.getDialogs(params);
+      for (const dialog of dialogs || []) {
+        const key = `${dialog.id}`;
+        if (!dialogMap.has(key)) {
+          dialogMap.set(key, dialog);
+        }
+      }
+    } catch (error) {
+      console.error("findUserFromGroups getDialogs error:", error);
+    }
+  };
+
   try {
-    const dialogs = await client.getDialogs({ limit: 50 });
-    for (const dialog of dialogs) {
+    await collectDialogs({});
+    await collectDialogs({ folderId: 1 });
+
+    for (const dialog of dialogMap.values()) {
       // 只检查群组和超级群组
       if (
         dialog.entity?.className === "Chat" ||
@@ -302,6 +325,7 @@ async function findUserFromGroups(
 }
 
 class IsAlivePlugin extends Plugin {
+
   description: string = `\nisalive\n\n${help_text}`;
   cmdHandlers: Record<
     string,
@@ -338,7 +362,6 @@ class IsAlivePlugin extends Plugin {
           if (/^-?\d+$/.test(input)) {
             const userId = Number(input);
             // 先尝试常规方式获取
-            await client.getDialogs({});
             try {
               entity = (await client.getEntity(userId)) as Api.User;
             } catch {
@@ -350,7 +373,6 @@ class IsAlivePlugin extends Plugin {
               entity = await findUserFromGroups(client, userId);
             }
           } else {
-            await client.getDialogs({});
             const username = input.startsWith("@") ? input : `@${input}`;
             entity = (await client.getEntity(username)) as Api.User;
           }
@@ -388,7 +410,7 @@ class IsAlivePlugin extends Plugin {
         try {
           const chatId = msg.chatId;
           if (chatId) {
-            const messages = await client.getMessages(chatId, {
+            const messages = await safeGetMessages(client, chatId, {
               fromUser: user.id,
               limit: 1,
             });
@@ -421,14 +443,14 @@ class IsAlivePlugin extends Plugin {
           `${statusIcon} ${entityInfo.display}`,
         ];
         if (entityInfo.username) {
-          lines.push(`├ 用户名: <code>@${entityInfo.username}</code>`);
+          lines.push(`├ 用户名: ${codeTag(`@${entityInfo.username}`)}`);
         }
         lines.push(`└ 用户ID: <a href="tg://user?id=${user.id}">${user.id}</a>`);
         lines.push(`<b>📡 在线状态</b>`);
-        lines.push(`├ 状态: <code>${lastOnlineDateTime ?? "未知"}</code>`);
-        lines.push(`└ 天数: <code>${lastOnlineDays === null ? "未知" : lastOnlineDays + " 天"}</code>`);
+        lines.push(`├ 状态: ${codeTag(lastOnlineDateTime ?? "未知")}`);
+        lines.push(`└ 天数: ${codeTag(lastOnlineDays === null ? "未知" : lastOnlineDays + " 天")}`);
         lines.push(`<b>💬 发言记录</b>`);
-        lines.push(`└ 本群最后发言: <code>${lastMessageTime ?? "无记录"}</code>`);
+        lines.push(`└ 本群最后发言: ${codeTag(lastMessageTime ?? "无记录")}`);
         lines.push(`<b>🏷️ 账号属性</b>`);
 
         // 账号属性

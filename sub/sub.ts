@@ -2,13 +2,14 @@ import { Plugin } from "@utils/pluginBase";
 import { getGlobalClient } from "@utils/globalClient";
 import { getPrefixes } from "@utils/pluginManager";
 import { createDirectoryInTemp } from "@utils/pathHelpers";
-import { Api } from "telegram";
-import { CustomFile } from "telegram/client/uploads.js";
+import { Api } from "teleproto";
+import { CustomFile } from "teleproto/client/uploads.js";
 import { exec } from "child_process";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import crypto from "crypto";
+import { safeGetReplyMessage } from "@utils/safeGetMessages";
 
 const prefixes = getPrefixes();
 const mainPrefix = prefixes[0];
@@ -27,7 +28,7 @@ function sh(cmd: string): Promise<string> {
 async function isSavedMessages(msg: Api.Message): Promise<boolean> {
   const client = await getGlobalClient();
   const me = await client?.getMe();
-  if (!me) return false;
+      if (!me) return false;
 
   return (
     msg.peerId &&
@@ -144,6 +145,7 @@ const help = `🧩 <b>Sub-Store 管理</b>
 • <code>${mainPrefix}sub restore</code> - 恢复`;
 
 class SubStorePlugin extends Plugin {
+
   description = `Sub-Store 管理\n\n${help}`;
 
   cmdHandlers: Record<string, (msg: Api.Message) => Promise<void>> = {
@@ -455,25 +457,7 @@ echo "后端: http://\$IP:3001/\$SECRET"`;
             await msg.edit({ text: manualText, parseMode: "html" });
             break;
 
-          case "info":
-            const secretFile = "/root/sub-store/.secret";
-            if (!fs.existsSync(secretFile)) {
-              await msg.edit({ text: "❌ 未部署" });
-              return;
-            }
-            const key = fs.readFileSync(secretFile, "utf8").trim();
-            const ip = await sh("curl -s ifconfig.me");
-            await msg.edit({
-              text: `面板: http://${ip.trim()}:3001\n后端: http://${ip.trim()}:3001/${key}`,
-            });
-            break;
 
-          case "status":
-            const status = await sh(
-              "docker ps --format '{{.Names}} {{.Status}}' | grep sub-store || echo '未运行'"
-            );
-            await msg.edit({ text: `📊 ${status}` });
-            break;
 
           case "logs":
             await msg.edit({ text: "📋 生成今日日志文件..." });
@@ -542,7 +526,7 @@ echo "后端: http://\$IP:3001/\$SECRET"`;
             break;
 
           case "restore":
-            const reply = await msg.getReplyMessage();
+            const reply = await safeGetReplyMessage(msg);
             if (!reply || !reply.document) {
               await msg.edit({ text: "❌ 请回复备份文件" });
               return;
