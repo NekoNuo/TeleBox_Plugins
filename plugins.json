@@ -7,6 +7,10 @@
     "url": "https://github.com/TeleBoxDev/TeleBox_Plugins/blob/main/acron/acron.ts?raw=true",
     "desc": "定时发送/转发/复制/置顶/取消置顶/删除消息/执行命令"
   },
+  "admin_board": {
+    "url": "https://github.com/TeleBoxDev/TeleBox_Plugins/blob/main/admin_board/admin_board.ts?raw=true",
+    "desc": "管理员排行榜 末位淘汰"
+  },
   "aff": {
     "url": "https://github.com/TeleBoxOrg/TeleBox_Plugins/blob/main/aff/aff.ts?raw=true",
     "desc": "机场Aff信息管理"
@@ -23,13 +27,13 @@
     "url": "https://github.com/TeleBoxOrg/TeleBox_Plugins/blob/main/annualreport/annualreport.ts?raw=true",
     "desc": "年度报告"
   },
-  "atall": {
-    "url": "https://github.com/TeleBoxDev/TeleBox_Plugins/blob/main/atall/atall.ts?raw=true",
-    "desc": "一键艾特全部成员"
-  },
   "atadmins": {
     "url": "https://github.com/TeleBoxDev/TeleBox_Plugins/blob/main/atadmins/atadmins.ts?raw=true",
     "desc": "一键艾特全部管理员"
+  },
+  "atall": {
+    "url": "https://github.com/TeleBoxDev/TeleBox_Plugins/blob/main/atall/atall.ts?raw=true",
+    "desc": "一键艾特全部成员"
   },
   "audio_to_voice": {
     "url": "https://github.com/TeleBoxDev/TeleBox_Plugins/blob/main/audio_to_voice/audio_to_voice.ts?raw=true",
@@ -54,6 +58,14 @@
   "banana": {
     "url": "https://github.com/TeleBoxDev/TeleBox_Plugins/blob/main/banana/banana.ts?raw=true",
     "desc": "Nano-Banana 图像编辑"
+  },
+  "bgp": {
+    "url": "https://github.com/TiaraBasori/TeleBox_Plugins/blob/main/bgp/bgp.ts?raw=true",
+    "desc": "BGP路由图查询工具"
+  },
+  "biko": {
+    "url": "https://github.com/TeleBoxDev/TeleBox_Plugins/blob/main/biko/biko.ts?raw=true",
+    "desc": "批量获取整理发送指定对话中指定用户的消息"
   },
   "bin": {
     "url": "https://github.com/TeleBoxDev/TeleBox_Plugins/blob/main/bin/bin.ts?raw=true",
@@ -99,6 +111,10 @@
     "url": "https://github.com/TeleBoxDev/TeleBox_Plugins/blob/main/copy_sticker_set/copy_sticker_set.ts?raw=true",
     "desc": "复制贴纸包"
   },
+  "codex_image": {
+    "url": "https://github.com/TeleBoxDev/TeleBox_Plugins/blob/main/codex_image/codex_image.ts?raw=true",
+    "desc": "通过codex调用gpt-image-2"
+  },
   "cosplay": {
     "url": "https://github.com/TeleBoxDev/TeleBox_Plugins/blob/main/cosplay/cosplay.ts?raw=true",
     "desc": "获取随机cos写真"
@@ -118,6 +134,10 @@
   "dc": {
     "url": "https://github.com/TeleBoxDev/TeleBox_Plugins/blob/main/dc/dc.ts?raw=true",
     "desc": "获取实体DC"
+  },
+  "deepwiki": {
+    "url": "https://github.com/TeleBoxDev/TeleBox_Plugins/blob/main/deepwiki/deepwiki.ts?raw=true",
+    "desc": "DeepWiki多项目聚合"
   },
   "dig": {
     "url": "https://github.com/TeleBoxDev/TeleBox_Plugins/blob/main/dig/dig.ts?raw=true",
@@ -307,10 +327,6 @@
     "url": "https://github.com/TeleBoxOrg/TeleBox_Plugins/blob/main/premium/premium.ts?raw=true",
     "desc": "群组大会员统计"
   },
-  "prometheus": {
-    "url": "https://github.com/TeleBoxOrg/TeleBox_Plugins/blob/main/prometheus/prometheus.ts?raw=true",
-    "desc": "突破Telegram保存限制"
-  },
   "q": {
     "url": "https://github.com/TeleBoxDev/TeleBox_Plugins/blob/main/q/q.ts?raw=true",
     "desc": "消息引用生成贴纸"
@@ -330,6 +346,10 @@
   "rev": {
     "url": "https://github.com/TeleBoxOrg/TeleBox_Plugins/blob/main/rev/rev.ts?raw=true",
     "desc": "反转你的消息"
+  },
+  "save": {
+    "url": "https://github.com/TiaraBasori/TeleBox_Plugins/blob/main/save/save.ts?raw=true",
+    "desc": "本地保存插件"
   },
   "search": {
     "url": "https://github.com/TeleBoxDev/TeleBox_Plugins/blob/main/search/search.ts?raw=true",
@@ -391,9 +411,17 @@
     "url": "https://github.com/TeleBoxOrg/TeleBox_Plugins/blob/main/teletype/teletype.ts?raw=true",
     "desc": "打字机效果"
   },
+  "tmp_admin": {
+    "url": "https://github.com/TeleBoxOrg/TeleBox_Plugins/blob/main/tmp_admin/tmp_admin.ts?raw=true",
+    "desc": "临时管理员"
+  },
   "trace": {
     "url": "https://github.com/TeleBoxDev/TeleBox_Plugins/blob/main/trace/trace.ts?raw=true",
     "desc": "全局追踪点赞"
+  },
+  "tts": {
+    "url": "https://github.com/TeleBoxDev/TeleBox_Plugins/blob/main/tts/tts.ts?raw=true",
+    "desc": "Azure文字转语音"
   },
   "uai": {
     "url": "https://github.com/TeleBoxDev/TeleBox_Plugins/blob/main/uai/uai.ts?raw=true",
@@ -434,5 +462,9 @@
   "zpr": {
     "url": "https://github.com/TeleBoxDev/TeleBox_Plugins/blob/main/zpr/zpr.ts?raw=true",
     "desc": "二次元图片"
+  },
+  "quote": {
+    "url": "https://github.com/yfishyon/TeleBox_Plugins/blob/main/quote/quote.ts?raw=true",
+    "desc": "引用贴纸生成 (本地版)"
   }
 }

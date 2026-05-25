@@ -1,6 +1,6 @@
 import { getPrefixes } from "@utils/pluginManager";
 import { Plugin } from "@utils/pluginBase";
-import { Api, TelegramClient } from "telegram";
+import { Api, TelegramClient } from "teleproto";
 import { getGlobalClient } from "@utils/globalClient";
 import * as path from "path";
 import * as fs from "fs";
@@ -8,6 +8,7 @@ import bigInt from "big-integer";
 import { Low } from "lowdb";
 import { JSONFile } from "lowdb/node";
 
+import { safeGetMe } from "@utils/authGuards";
 // 获取命令前缀
 const prefixes = getPrefixes();
 const mainPrefix = prefixes[0];
@@ -22,8 +23,8 @@ const htmlEscape = (text: string): string =>
 // 帮助文档常量
 const help_text = `<b>批量删除</b>
 
-<code>.da true</code> 开始删除
-<code>.da stop</code> 停止任务`;
+<code>${mainPrefix}da true</code> 开始删除
+<code>${mainPrefix}da stop</code> 停止任务`;
 
 // 删除任务状态管理
 interface DeleteTask {
@@ -191,10 +192,18 @@ const sendProgressToSaved = async (
       statusText = "⏸️ 已暂停";
     }
 
-    const message = `📊 <b>删除任务${status}</b>
+    const safeStatus = htmlEscape(status);
+    const safeChatName = htmlEscape(task.chatName);
+    const safeStatusText = htmlEscape(statusText);
+    const recentErrors = task.errors
+      .slice(-3)
+      .map((error) => htmlEscape(error))
+      .join("\n");
 
-<b>群聊:</b> ${task.chatName}
-<b>状态:</b> ${statusText}
+    const message = `📊 <b>删除任务${safeStatus}</b>
+
+<b>群聊:</b> ${safeChatName}
+<b>状态:</b> ${safeStatusText}
 
 <b>📈 统计信息:</b>
 • 已删除: <code>${task.deletedMessages.toLocaleString()}</code> 条
@@ -203,7 +212,7 @@ const sendProgressToSaved = async (
 
 <b>最后更新:</b> ${new Date(task.lastUpdate).toLocaleString("zh-CN")}
 
-${task.errors.length > 0 ? `<b>⚠️ 最近错误:</b>\n${task.errors.slice(-3).join("\n")}` : ""}`;
+${recentErrors ? `<b>⚠️ 最近错误:</b>\n${recentErrors}` : ""}`;
 
     // 如果已有收藏夹消息，则编辑；否则创建新消息
     if (task.savedMessageId) {
@@ -229,22 +238,6 @@ ${task.errors.length > 0 ? `<b>⚠️ 最近错误:</b>\n${task.errors.slice(-3)
   } catch (error) {
     console.error("发送进度到收藏夹失败:", error);
     return undefined;
-  }
-};
-
-// 计算已用时间
-const calculateElapsedTime = (task: DeleteTask): string => {
-  const elapsed = Date.now() - task.startTime;
-  const hours = Math.floor(elapsed / 3600000);
-  const minutes = Math.floor((elapsed % 3600000) / 60000);
-  const seconds = Math.floor((elapsed % 60000) / 1000);
-  
-  if (hours > 0) {
-    return `${hours}小时 ${minutes}分钟 ${seconds}秒`;
-  } else if (minutes > 0) {
-    return `${minutes}分钟 ${seconds}秒`;
-  } else {
-    return `${seconds}秒`;
   }
 };
 
@@ -413,7 +406,8 @@ const da = async (msg: Api.Message) => {
 
     // 开始执行删除任务
     const chatId = msg.chatId;
-    const me = await client.getMe();
+    const me = await safeGetMe(client);
+           if (!me) return;
     const myId = me.id;
 
     // 检查管理员权限
@@ -472,8 +466,6 @@ const da = async (msg: Api.Message) => {
 
     // 批处理配置
     const BATCH_SIZE = 100;
-    let floodWaitTime = 0;
-    let consecutiveErrors = 0;
 
     if (isAdmin) {
       // 管理员模式：使用传统遍历删除所有消息
@@ -596,6 +588,7 @@ const da = async (msg: Api.Message) => {
 };
 
 class DaPlugin extends Plugin {
+
   // 必须在 description 中引用 help_text
   description: string = `群组消息批量删除插件\n\n${help_text}`;
   

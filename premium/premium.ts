@@ -1,6 +1,11 @@
 import { Plugin } from "@utils/pluginBase";
-import { Api } from "telegram";
+import { getPrefixes } from "@utils/pluginManager";
+import { Api } from "teleproto";
 import { getGlobalClient } from "@utils/globalClient";
+
+const prefixes = getPrefixes();
+const mainPrefix = prefixes[0];
+
 
 // HTML转义函数（必需）
 const htmlEscape = (text: string): string => 
@@ -10,13 +15,14 @@ const htmlEscape = (text: string): string =>
   }[m] || m));
 
 class PremiumPlugin extends Plugin {
+
   name = "premium";
   
   description = `🎁 群组大会员统计插件
 
 <b>命令格式：</b>
-<code>.premium</code> - 统计群组大会员情况
-<code>.premium force</code> - 强制统计（超过1万人时使用）
+<code>${mainPrefix}premium</code> - 统计群组大会员情况
+<code>${mainPrefix}premium force</code> - 强制统计（超过1万人时使用）
 
 <b>功能：</b>
 • 统计群组中的Telegram Premium会员情况
@@ -77,7 +83,7 @@ class PremiumPlugin extends Plugin {
       // 检查人数限制
       if (participantCount >= 10000 && !forceMode) {
         await msg.edit({
-          text: `😵 <b>人数过多</b>\n\n太...太多人了... 我会...会...会坏掉的...\n\n如果您执意要运行的的话，您可以使用指令 <code>.premium force</code>`,
+          text: `😵 <b>人数过多</b>\n\n太...太多人了... 我会...会...会坏掉的...\n\n如果您执意要运行的的话，您可以使用指令 <code>${mainPrefix}premium force</code>`,
           parseMode: "html"
         });
         return;
@@ -113,7 +119,7 @@ class PremiumPlugin extends Plugin {
           }
           continue;
         } else if (participant instanceof Api.ChatParticipant) {
-          user = participant.userId as unknown as Api.User;
+          user = null;
         } else if (participant instanceof Api.User) {
           user = participant;
         }

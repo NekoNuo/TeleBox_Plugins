@@ -2,12 +2,20 @@ import axios from "axios";
 import _ from "lodash";
 import { getPrefixes } from "@utils/pluginManager";
 import { Plugin } from "@utils/pluginBase";
-import { Api } from "telegram";
-import { sleep } from "telegram/Helpers";
+import { Api } from "teleproto";
+import { sleep } from "teleproto/Helpers";
+import { safeGetMessages } from "@utils/safeGetMessages";
 
 const prefixes = getPrefixes();
 const mainPrefix = prefixes[0];
-const botReady = new Map<string, boolean>();
+const htmlEscape = (text: string): string =>
+  text.replace(/[&<>"']/g, (m) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#x27;",
+  }[m] || m));
 
 const bots = {
   default: "@music_v1bot",
@@ -18,6 +26,8 @@ const bots = {
 const pluginName = "music_bot";
 
 const commandName = `${mainPrefix}${pluginName}`;
+
+const botReady = new Map<string, boolean>();
 
 const help_text = `
 依赖 ${Object.values(bots).join(", ")}
@@ -61,7 +71,7 @@ async function searchAndSendMusic(
   // Give quick feedback
   try {
     await msg.edit({
-      text: `🔎 搜索中：<code>${displayKeyword ?? keyword}</code>`,
+      text: `🔎 搜索中：<code>${htmlEscape(displayKeyword ?? keyword)}</code>`,
       parseMode: "html",
     });
   } catch {}
@@ -122,7 +132,7 @@ async function searchAndSendMusic(
   let replyWithButtons: any | undefined;
   for (let i = 0; i < 15; i++) {
     await sleep(700);
-    const msgs = await client.getMessages(bot, { limit: 1 });
+    const msgs = await safeGetMessages(client, bot, { limit: 1 });
     for (const m of msgs.slice().reverse()) {
       if (!m.out && (m.date || 0) >= startTs && (m.buttonCount || 0) > 0) {
         replyWithButtons = m;
@@ -133,7 +143,7 @@ async function searchAndSendMusic(
   }
 
   if (!replyWithButtons) {
-    await msg.edit({ text: `⚠️ 机器人未启用或未响应，请先打开 ${bot} 并点击 Start，然后重试。` });
+    await msg.edit({ text: `⚠️ 机器人未启用或未响应，请先打开 ${htmlEscape(bot)} 并点击 Start，然后重试。` });
     return;
   }
 
@@ -165,7 +175,7 @@ async function searchAndSendMusic(
   let mediaMsg: any | undefined;
   for (let i = 0; i < 20; i++) {
     await sleep(700);
-    const msgs = await client.getMessages(bot, { limit: 6 });
+    const msgs = await safeGetMessages(client, bot, { limit: 6 });
     for (const m of msgs.slice().reverse()) {
       if (
         !m.out &&
@@ -193,7 +203,7 @@ async function searchAndSendMusic(
   } else {
     await client.sendFile(msg.peerId, {
       file: mediaMsg.media,
-      caption: `🎵 ${displayKeyword ?? keyword}`,
+      caption: `🎵 ${htmlEscape(displayKeyword ?? keyword)}`,
       replyTo: msg.replyTo?.replyToTopId || msg.replyTo?.replyToMsgId,
     });
   }
@@ -210,6 +220,10 @@ function getRemarkFromMsg(msg: Api.Message | string, n: number): string {
 }
 
 class MusicBotPlugin extends Plugin {
+  cleanup(): void {
+    botReady.clear();
+  }
+
   description: string = `\n多音源音乐搜索\n${help_text}`;
   cmdHandlers: Record<
     string,

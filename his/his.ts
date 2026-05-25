@@ -8,7 +8,8 @@
 import { Plugin } from "@utils/pluginBase";
 import { getGlobalClient } from "@utils/globalClient";
 import { getPrefixes } from "@utils/pluginManager";
-import { Api } from "telegram";
+import { Api } from "teleproto";
+import { safeGetReplyMessage } from "@utils/safeGetMessages";
 
 // 获取命令前缀
 const prefixes = getPrefixes();
@@ -62,6 +63,7 @@ const MEDIA_TYPES: Record<string, string> = {
 };
 
 class HisPlugin extends Plugin {
+
   // 必须在 description 中引用 help_text
   description: string = `消息历史查询插件\n\n${help_text}`;
   
@@ -95,7 +97,7 @@ class HisPlugin extends Plugin {
         if (args.length === 0) {
           // 如果是回复消息，则查询被回复者
           if (msg.isReply) {
-            const reply = await msg.getReplyMessage();
+            const reply = await safeGetReplyMessage(msg);
             if (reply && reply.senderId) {
               const target = reply.senderId.toString();
               await this.queryHistory(msg, target, DEFAULT_COUNT, client);
@@ -105,7 +107,6 @@ class HisPlugin extends Plugin {
           
           // 否则显示错误提示
           await msg.edit({
-            text: `❌ <b>参数不足</b>\n\n💡 使用 <code>${mainPrefix}his help</code> 查看帮助`,
             parseMode: "html"
           });
           return;
@@ -118,7 +119,7 @@ class HisPlugin extends Plugin {
           
           // 如果是数字且在回复消息的情况下，作为数量参数
           if (!isNaN(num) && num > 0 && msg.isReply) {
-            const reply = await msg.getReplyMessage();
+            const reply = await safeGetReplyMessage(msg);
             if (reply && reply.senderId) {
               const target = reply.senderId.toString();
               const count = Math.min(num, 100); // 最大限制100条
@@ -153,7 +154,6 @@ class HisPlugin extends Plugin {
 
         // 参数过多
         await msg.edit({
-          text: `❌ <b>参数过多</b>\n\n💡 使用 <code>${mainPrefix}his help</code> 查看帮助`,
           parseMode: "html"
         });
         return;

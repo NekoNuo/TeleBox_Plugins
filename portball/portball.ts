@@ -1,8 +1,14 @@
 import { Plugin } from "@utils/pluginBase";
-import { Api } from "telegram";
+import { getPrefixes } from "@utils/pluginManager";
+import { Api } from "teleproto";
 import { getGlobalClient } from "@utils/globalClient";
+import { safeGetReplyMessage } from "@utils/safeGetMessages";
 
+import { safeGetMe } from "@utils/authGuards";
 // HTML转义函数
+const prefixes = getPrefixes();
+const mainPrefix = prefixes[0];
+
 const htmlEscape = (text: string): string => 
   text.replace(/[&<>"']/g, m => ({ 
     '&': '&amp;', '<': '&lt;', '>': '&gt;', 
@@ -26,7 +32,21 @@ const parseTimeString = (timeStr: string): number => {
   return value * (multipliers[unit] || 1);
 };
 
+// Timer tracking for safe cleanup
+const pendingTimers = new Set<ReturnType<typeof setTimeout>>();
+
+function scheduleTimer(fn: () => void, ms: number): ReturnType<typeof setTimeout> {
+  const t = setTimeout(() => {
+    pendingTimers.delete(t);
+    fn();
+  }, ms);
+  pendingTimers.add(t);
+  return t;
+}
+
+
 class PortballPlugin extends Plugin {
+
   name = "portball";
   description = "🔇 临时禁言工具 - 回复消息实现XX秒禁言";
   
@@ -37,7 +57,7 @@ class PortballPlugin extends Plugin {
   private readonly helpText = `🔇 <b>Portball 临时禁言工具</b>
 
 <b>用法：</b>
-<code>.portball [理由] 时间</code>
+<code>${mainPrefix}portball [理由] 时间</code>
 
 <b>时间单位：</b>
 • s - 秒 (默认)
@@ -46,10 +66,10 @@ class PortballPlugin extends Plugin {
 • d - 天
 
 <b>示例：</b>
-• <code>.portball 广告 5m</code> - 禁言5分钟
-• <code>.portball 10m</code> - 禁言10分钟
-• <code>.portball 刷屏 1h</code> - 禁言1小时
-• <code>.portball 300</code> - 禁言300秒
+• <code>${mainPrefix}portball 广告 5m</code> - 禁言5分钟
+• <code>${mainPrefix}portball 10m</code> - 禁言10分钟
+• <code>${mainPrefix}portball 刷屏 1h</code> - 禁言1小时
+• <code>${mainPrefix}portball 300</code> - 禁言300秒
 
 <b>注意：</b>
 • 需要回复目标用户的消息
@@ -72,7 +92,7 @@ class PortballPlugin extends Plugin {
       }
 
       // 获取回复消息
-      const replyMsg = await msg.getReplyMessage();
+      const replyMsg = await safeGetReplyMessage(msg);
       if (!replyMsg) {
         await msg.edit({
           text: "❌ <b>错误：</b>请回复要禁言用户的消息",
@@ -94,7 +114,8 @@ class PortballPlugin extends Plugin {
       }
 
       // 检查是否为自己
-      const self = await client.getMe();
+      const self = await safeGetMe(client);
+  if (!self) return;
       if (sender.id?.eq?.(self.id)) {
         await msg.edit({
           text: "❌ <b>错误：</b>无法禁言自己",
@@ -248,7 +269,7 @@ class PortballPlugin extends Plugin {
 
   // 自动删除消息
   private async autoDelete(msg: Api.Message, seconds: number = 5): Promise<void> {
-    setTimeout(async () => {
+    scheduleTimer(async () => {
       try {
         await msg.delete({ revoke: true });
       } catch (error) {
@@ -256,6 +277,11 @@ class PortballPlugin extends Plugin {
       }
     }, seconds * 1000);
   }
+  cleanup(): void {
+    for (const timer of pendingTimers) {
+      clearTimeout(timer);
+    }
+    pendingTimers.clear();
+  }
 }
-
 export default new PortballPlugin();

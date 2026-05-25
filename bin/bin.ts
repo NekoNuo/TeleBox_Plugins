@@ -1,6 +1,6 @@
 import { Plugin } from "@utils/pluginBase";
 import { getPrefixes } from "@utils/pluginManager";
-import { Api } from "telegram";
+import { Api } from "teleproto";
 
 const mainPrefix = getPrefixes()[0];
 const htmlEscape = (text: string): string =>
@@ -133,6 +133,7 @@ async function fetchFromBincheck(bin: string): Promise<Partial<{ scheme: string;
 }
 
 class BinPlugin extends Plugin {
+
   description: string = `BIN 查询插件\n\n${help_text}`;
   cmdHandlers: Record<string, (msg: Api.Message) => Promise<void>> = {
     bin: async (msg: Api.Message) => {

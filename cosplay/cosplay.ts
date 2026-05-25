@@ -1,9 +1,9 @@
 // Cosplay Plugin - 从 cosplaytele.com 获取随机cosplay图片
-import { Plugin } from "../src/utils/pluginBase";
-import { Api } from "telegram";
-import { CustomFile } from "telegram/client/uploads";
-import { getPrefixes } from "../src/utils/pluginManager";
-import { npm_install } from "../src/utils/npm_install";
+import { Plugin } from "@utils/pluginBase";
+import { Api } from "teleproto";
+import { CustomFile } from "teleproto/client/uploads";
+import { getPrefixes } from "@utils/pluginManager";
+import { npm_install } from "@utils/npm_install";
 import axios, { AxiosError, AxiosInstance } from "axios";
 import * as fs from "fs";
 import * as path from "path";
@@ -274,6 +274,7 @@ class CosplayScraper {
 }
 
 async function cleanup(files: string[]): Promise<void> {
+    // 真实资源清理：释放插件持有的定时器、监听器、运行时状态或临时资源。
   await Promise.allSettled(
     files.map(async (filePath) => {
       try {
@@ -335,7 +336,7 @@ async function sendImageAlbum(
 
     const singles: Api.InputSingleMedia[] = [];
 
-    const { getInputPhoto, getInputDocument } = await import("telegram/Utils");
+    const { getInputPhoto, getInputDocument } = await import("teleproto/Utils");
 
     for (let i = 0; i < files.length; i++) {
       const file = files[i];

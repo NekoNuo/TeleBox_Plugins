@@ -1,13 +1,31 @@
-import { Plugin } from "../src/utils/pluginBase";
-import { getGlobalClient } from "../src/utils/globalClient";
-import { Api } from "telegram";
+import { Plugin } from "@utils/pluginBase";
+import { getGlobalClient } from "@utils/globalClient";
+import { Api } from "teleproto";
 import bigInt from "big-integer";
+import { getPrefixes } from "@utils/pluginManager";
+const prefixes = getPrefixes();
+const mainPrefix = prefixes[0];
+
+
+
+// Timer tracking for safe cleanup
+const pendingTimers = new Set<ReturnType<typeof setTimeout>>();
+
+function scheduleTimer(fn: () => void, ms: number): ReturnType<typeof setTimeout> {
+  const t = setTimeout(() => {
+    pendingTimers.delete(t);
+    fn();
+  }, ms);
+  pendingTimers.add(t);
+  return t;
+}
 
 
 class ClearStickerPlugin extends Plugin {
+
   description: string = `🧹 <b>清理群内贴纸消息</b><br/><br/>
 <b>命令</b><br/>
-• <code>.clear_sticker [数量]</code> / <code>.cs [数量]</code><br/><br/>
+• <code>${mainPrefix}clear_sticker [数量]</code> / <code>${mainPrefix}cs [数量]</code><br/><br/>
 <b>说明</b><br/>
 • 清理群内历史贴纸消息（仅群聊可用）<br/>
 • 可选参数“数量”用于限制删除数量（默认清理全部）`;
@@ -44,7 +62,7 @@ class ClearStickerPlugin extends Plugin {
         const countArg = parseInt(args[0]);
         if (isNaN(countArg) || countArg < 1) {
           await msg.edit({
-            text: "❌ 请输入有效的贴纸数量，例如：.clear_sticker 100"
+            text: "❌ 请输入有效的贴纸数量，例如：${mainPrefix}clear_sticker 100"
           });
           return;
         }
@@ -169,7 +187,7 @@ class ClearStickerPlugin extends Plugin {
           });
           
 
-          setTimeout(async () => {
+          scheduleTimer(async () => {
             try {
               if (finalMsg && typeof finalMsg.delete === 'function') {
                 await finalMsg.delete();
@@ -194,6 +212,11 @@ class ClearStickerPlugin extends Plugin {
       });
     }
   }
+  cleanup(): void {
+    for (const timer of pendingTimers) {
+      clearTimeout(timer);
+    }
+    pendingTimers.clear();
+  }
 }
-
 export default new ClearStickerPlugin();

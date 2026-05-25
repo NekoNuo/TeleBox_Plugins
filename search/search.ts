@@ -1,9 +1,14 @@
 import { Plugin } from "@utils/pluginBase";
-import { Api } from "telegram/tl";
-import { CustomFile } from "telegram/client/uploads";
+import { Api } from "teleproto/tl";
+import { CustomFile } from "teleproto/client/uploads";
 import { getGlobalClient } from "@utils/globalClient";
+import { getPrefixes } from "@utils/pluginManager";
 import fs from "fs/promises";
 import path from "path";
+import { safeGetMessages, safeGetReplyMessage } from "@utils/safeGetMessages";
+
+const prefixes = getPrefixes();
+const mainPrefix = prefixes[0];
 
 const CONFIG_FILE_PATH = path.join(
   process.cwd(),
@@ -122,7 +127,7 @@ class SearchService {
 
     try {
       const linkedGroupEntity = await this.client.getEntity(channelInfo.linkedGroup);
-      const groupMessages = await this.client.getMessages(linkedGroupEntity, {
+      const groupMessages = await safeGetMessages(this.client, linkedGroupEntity, {
         limit: 100,
         search: query,
       });
@@ -130,7 +135,7 @@ class SearchService {
       for (const textMsg of groupMessages) {
         if (this.isMessageMatching(textMsg, query) && textMsg.replies) {
           console.log(`找到匹配消息 #${textMsg.id}，正在精确获取其 ${textMsg.replies.replies} 条评论...`);
-          const comments = await this.client.getMessages(linkedGroupEntity, {
+          const comments = await safeGetMessages(this.client, linkedGroupEntity, {
             limit: 100,
             replyTo: textMsg.id,
           });
@@ -150,7 +155,7 @@ class SearchService {
       }
 
       if (videos.length === 0) {
-        const groupVideoMessages = await this.client.getMessages(linkedGroupEntity, {
+        const groupVideoMessages = await safeGetMessages(this.client, linkedGroupEntity, {
           limit: 100,
           search: query,
           filter: new Api.InputMessagesFilterVideo(),
@@ -261,7 +266,7 @@ class SearchService {
   }
 
   private async handleDelete(msg: Api.Message, args: string) {
-    if (!args) throw new Error("用法: .so del <频道链接|序号> [...] 或 .so del all。");
+    if (!args) throw new Error("用法: ${mainPrefix}so del &lt;频道链接|序号&gt; [...] 或 ${mainPrefix}so del all。");
     if (args.toLowerCase().trim() === "all") {
         const count = this.config.channelList.length;
         this.config.channelList = [];
@@ -316,7 +321,7 @@ class SearchService {
   }
 
   private async handleDefault(msg: Api.Message, args: string) {
-    if (!args) throw new Error("用法: .so default <频道链接> 或 .so default d。");
+    if (!args) throw new Error("用法: ${mainPrefix}so default &lt;频道链接&gt; 或 ${mainPrefix}so default d。");
     if (args === "d") {
         this.config.defaultChannel = null;
         await this.saveConfig();
@@ -325,7 +330,7 @@ class SearchService {
     }
     const normalizedHandle = args.trim();
     if (!this.config.channelList.some((c) => c.handle === normalizedHandle)) {
-        throw new Error("请先使用 `.so add` 添加此频道。");
+        throw new Error("请先使用 `${mainPrefix}so add` 添加此频道。");
     }
     this.config.defaultChannel = normalizedHandle;
     await this.saveConfig();
@@ -359,7 +364,7 @@ class SearchService {
   }
 
   private async handleImport(msg: Api.Message) {
-    const replied = await msg.getReplyMessage();
+    const replied = await safeGetReplyMessage(msg);
     if (!replied || !replied.document) throw new Error("❌ 请回复备份文件。");
     
     const buffer = await this.client.downloadMedia(replied.media!);
@@ -401,7 +406,7 @@ class SearchService {
         }
         break;
       default:
-        throw new Error("用法: .so ad <add|del|list> [关键词]");
+        throw new Error(`用法: ${mainPrefix}so ad &lt;add|del|list&gt; [关键词]`);
     }
   }
 
@@ -422,7 +427,7 @@ class SearchService {
     type: "kkp" | "search"
   ) {
     if (this.config.channelList.length === 0)
-      throw new Error("请至少使用 `.so add` 添加一个搜索频道。");
+      throw new Error("请至少使用 `${mainPrefix}so add` 添加一个搜索频道。");
 
     const initialMessage = type === "kkp" ? "🎲 正在随机寻找视频..." : "🔍 正在搜索视频...";
     await msg.edit({ text: initialMessage });
@@ -452,7 +457,7 @@ class SearchService {
             if (linkedVideos.length > 0) videosInCurrentChannel.push(...linkedVideos);
           }
 
-          const allQueryMessages = await this.client.getMessages(entity, { limit: 200, search: query });
+          const allQueryMessages = await safeGetMessages(this.client, entity, { limit: 200, search: query });
 
           for (const foundMsg of allQueryMessages) {
             if (this.isMessageMatching(foundMsg, query)) {
@@ -460,12 +465,14 @@ class SearchService {
                 const groupIdStr = foundMsg.groupedId.toString();
                 if (processedGroupIds.has(groupIdStr)) continue;
 
-                const surroundingMessages = await this.client.getMessages(entity, {
+                const surroundingMessages = await safeGetMessages(this.client, entity, {
                     limit: 20,
                     offsetId: foundMsg.id + 10,
                 });
                 
-                const albumMessages = surroundingMessages.filter((m: Api.Message) => m.groupedId?.equals(foundMsg.groupedId));
+                const groupedId = foundMsg.groupedId;
+                if (!groupedId) continue;
+                const albumMessages = surroundingMessages.filter((m: Api.Message) => m.groupedId?.equals(groupedId));
                 const videosInAlbum = albumMessages.filter((m: Api.Message) => m.video && !this.isAdContent(m));
 
                 if (videosInAlbum.length > 0) {
@@ -479,7 +486,7 @@ class SearchService {
           }
         } else if (type === "kkp") { 
           const isMegagroup = entity instanceof Api.Channel && entity.megagroup === true;
-          const messages = await this.client.getMessages(entity, {
+          const messages = await safeGetMessages(this.client, entity, {
             limit: isMegagroup ? 200 : 100,
             filter: new Api.InputMessagesFilterVideo(),
           });
@@ -686,28 +693,33 @@ const so = async (msg: Api.Message) => {
 };
 
 class ChannelSearchPlugin extends Plugin {
+    cleanup(): void {
+    // 当前插件不持有需要在 reload 时额外释放的长期资源。
+  }
+
+
   description: string = `强大的多频道资源搜索插件，具备高级功能：
 
 搜索功能:
-- 关键词搜索: .so <关键词> （不限制大小和时长）
-- 随机速览: .so kkp （随机选择20秒-3分钟的视频）
+- 关键词搜索: ${mainPrefix}so &lt;关键词&gt; （不限制大小和时长）
+- 随机速览: ${mainPrefix}so kkp （随机选择20秒-3分钟的视频）
 
 选项:
 - 防剧透模式: -s (下载视频并将其作为防剧透消息发送)
 - 随机模式: -r (从匹配结果中随机选择)
 
 频道管理:
-- 添加频道: .so add <频道链接> (使用 \\ 分隔)
-- 删除频道: .so del <频道链接|序号> [...] 或 .so del all (删除所有)
-- 设置默认: .so default <频道链接> 或 .so default d (移除默认)
-- 列出频道: .so list
-- 导出配置: .so export
-- 导入配置: .so import (回复备份文件)
+- 添加频道: .so add &lt;频道链接&gt; (使用 \\ 分隔)
+- 删除频道: ${mainPrefix}so del &lt;频道链接|序号&gt; [...] 或 ${mainPrefix}so del all (删除所有)
+- 设置默认: ${mainPrefix}so default &lt;频道链接&gt; 或 ${mainPrefix}so default d (移除默认)
+- 列出频道: ${mainPrefix}so list
+- 导出配置: ${mainPrefix}so export
+- 导入配置: ${mainPrefix}so import (回复备份文件)
 
 广告过滤:
-- 添加关键词: .so ad add <关键词1> <关键词2> ...
-- 删除关键词: .so ad del <关键词1> <关键词2> ...
-- 查看关键词: .so ad list`;
+- 添加关键词: ${mainPrefix}so ad add &lt;关键词1&gt; &lt;关键词2&gt; ...
+- 删除关键词: ${mainPrefix}so ad del &lt;关键词1&gt; &lt;关键词2&gt; ...
+- 查看关键词: ${mainPrefix}so ad list`;
   
   cmdHandlers: Record<string, (msg: Api.Message) => Promise<void>> = {
     so,

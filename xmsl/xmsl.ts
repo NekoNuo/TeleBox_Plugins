@@ -1,5 +1,6 @@
 import { Plugin } from '@utils/pluginBase';
-import { Api } from 'telegram';
+import { getPrefixes } from '@utils/pluginManager';
+import { Api } from 'teleproto';
 import axios from 'axios';
 import { createDirectoryInAssets, createDirectoryInTemp } from '@utils/pathHelpers';
 import * as path from 'path';
@@ -7,10 +8,14 @@ import * as fs from 'fs';
 import { JSONFilePreset } from 'lowdb/node';
 import { getGlobalClient } from '@utils/globalClient';
 import { execFile } from 'child_process';
+import { safeGetReplyMessage } from '@utils/safeGetMessages';
 import { promisify } from 'util';
 
 const execFileAsync = promisify(execFile);
 const XMSL_TEMP_DIR = createDirectoryInTemp('xmsl');
+
+const prefixes = getPrefixes();
+const mainPrefix = prefixes[0];
 
 type APIMode = 'openai' | 'gemini';
 
@@ -180,6 +185,7 @@ const SYSTEM_PROMPT = `你的任务是对用户的内容（文字或图片）做
 你：羡慕会吃`;
 
 class XMSLPlugin extends Plugin {
+
 	name = 'xmsl';
 	private config: XMSLConfig = {
 		apiMode: 'openai',
@@ -195,12 +201,12 @@ class XMSLPlugin extends Plugin {
 
 <b>📋 命令列表</b>
 
-• <code>.xmsl [内容]</code> 或 <code>.xm [内容]</code> - 生成羡慕语句
-• <code>.xmsl</code>回复图片/贴纸 - 识别图片生成羡慕语句
-• <code>.xmsl</code> 或 <code>.xm</code> - 显示状态
-• <code>.xm set [key] [value]</code> - 修改配置
-• <code>.xm show</code> - 显示配置
-• <code>.xm help</code> - 显示帮助
+• <code>${mainPrefix}xmsl [内容]</code> 或 <code>${mainPrefix}xm [内容]</code> - 生成羡慕语句
+• <code>${mainPrefix}xmsl</code>回复图片/贴纸 - 识别图片生成羡慕语句
+• <code>${mainPrefix}xmsl</code> 或 <code>${mainPrefix}xm</code> - 显示状态
+• <code>${mainPrefix}xm set [key] [value]</code> - 修改配置
+• <code>${mainPrefix}xm show</code> - 显示配置
+
 <b>🖼️ 支持的媒体类型</b>
 • 图片 (jpeg/png/gif)
 • 静态贴纸 (webp)
@@ -285,7 +291,7 @@ class XMSLPlugin extends Plugin {
 		try {
 			// 处理图片
 			if (message.media instanceof Api.MessageMediaPhoto) {
-				const buffer = await client.downloadMedia(message.media, { workers: 1 });
+				const buffer = await client.downloadMedia(message.media, {});
 				if (buffer && Buffer.isBuffer(buffer)) {
 					const detectedMime = detectImageMime(buffer);
 					if (detectedMime) {
@@ -312,7 +318,7 @@ class XMSLPlugin extends Plugin {
 
 				// TGS 动态贴纸 - 尝试渲染第一帧
 				if (mimeType === TGS_MIME) {
-					const buffer = await client.downloadMedia(message.media, { workers: 1 });
+					const buffer = await client.downloadMedia(message.media, {});
 					if (buffer && Buffer.isBuffer(buffer)) {
 						const pngBuffer = await extractTgsFirstFrame(buffer);
 						if (pngBuffer) {
@@ -329,7 +335,7 @@ class XMSLPlugin extends Plugin {
 
 				// 视频贴纸 (WebM) - 提取第一帧
 				if (mimeType === WEBM_MIME) {
-					const buffer = await client.downloadMedia(message.media, { workers: 1 });
+					const buffer = await client.downloadMedia(message.media, {});
 					if (buffer && Buffer.isBuffer(buffer)) {
 						const pngBuffer = await extractWebmFirstFrame(buffer);
 						if (pngBuffer) {
@@ -347,7 +353,7 @@ class XMSLPlugin extends Plugin {
 				// 静态图片和贴纸
 				if (SUPPORTED_IMAGE_MIMES.includes(mimeType)) {
 					// 已知支持的图片格式，直接下载
-					const buffer = await client.downloadMedia(message.media, { workers: 1 });
+					const buffer = await client.downloadMedia(message.media, {});
 					if (buffer && Buffer.isBuffer(buffer)) {
 						const detectedMime = detectImageMime(buffer);
 						if (detectedMime) {
@@ -361,7 +367,6 @@ class XMSLPlugin extends Plugin {
 				} else if (isSticker) {
 					// 其他贴纸类型（未知格式），尝试下载缩略图
 					const buffer = await client.downloadMedia(message.media, {
-						workers: 1,
 						thumb: 1
 					});
 					if (buffer && Buffer.isBuffer(buffer)) {
@@ -392,7 +397,7 @@ class XMSLPlugin extends Plugin {
 			// 如果是回复消息且没有参数，则尝试获取被回复消息的内容或媒体
 			if (msg.replyToMsgId && args.length === 0) {
 				try {
-					const replyMsg = await msg.getReplyMessage();
+					const replyMsg = await safeGetReplyMessage(msg);
 					if (replyMsg) {
 						// 优先尝试提取媒体
 						const mediaInfo = await this.extractMediaInfo(replyMsg);
@@ -467,7 +472,7 @@ class XMSLPlugin extends Plugin {
 	private async handleSet(msg: Api.Message, args: string[]) {
 		if (args.length < 2) {
 			await msg.edit({
-				text: '❌ 参数错误\n使用: <code>.xm set [key] [value]</code>',
+				text: '❌ 参数错误\n使用: <code>${mainPrefix}xm set [key] [value]</code>',
 				parseMode: 'html',
 			});
 			return;
@@ -531,7 +536,7 @@ ${modeEmoji} 模式: ${this.config.apiMode}
 📍 地址: ${this.htmlEscape(this.config.baseUrl.replace(/\/$/, ''))}
 🤖 模型: ${this.config.model}
 
-使用 <code>.xm help</code> 查看帮助`;
+使用  查看帮助`;
 
 		await msg.edit({ text: statusText, parseMode: 'html' });
 	}
@@ -544,7 +549,7 @@ key: ${this.config.apiKey ? '✅ 已设置' : '❌ 未设置'}
 url: <code>${this.htmlEscape(this.config.baseUrl.replace(/\/$/, ''))}</code>
 model: <code>${this.htmlEscape(this.config.model)}</code>
 
-使用 <code>.xm set [key] [value]</code> 修改配置`;
+使用 <code>${mainPrefix}xm set [key] [value]</code> 修改配置`;
 
 		await msg.edit({ text: configText, parseMode: 'html' });
 	}
@@ -552,7 +557,7 @@ model: <code>${this.htmlEscape(this.config.model)}</code>
 	private async askAI(msg: Api.Message, question: string, imageInfo?: MediaInfo) {
 		if (!this.config.apiKey) {
 			await msg.edit({
-				text: '❌ 未设置 API 密钥\n使用: <code>.xm set key [你的密钥]</code>',
+				text: '❌ 未设置 API 密钥\n使用: <code>${mainPrefix}xm set key [你的密钥]</code>',
 				parseMode: 'html',
 			});
 			return;
@@ -560,7 +565,7 @@ model: <code>${this.htmlEscape(this.config.model)}</code>
 
 		if (!this.config.model) {
 			await msg.edit({
-				text: '❌ 未设置模型\n使用: <code>.xm set model [模型名]</code>',
+				text: '❌ 未设置模型\n使用: <code>${mainPrefix}xm set model [模型名]</code>',
 				parseMode: 'html',
 			});
 			return;

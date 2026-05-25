@@ -1,11 +1,22 @@
 import { Plugin } from "@utils/pluginBase";
-import { Api } from "telegram";
+import { Api } from "teleproto";
 import { getPrefixes } from "@utils/pluginManager";
-import { sleep } from "telegram/Helpers";
+import { sleep } from "teleproto/Helpers";
+import { safeGetMessages } from "@utils/safeGetMessages";
 
 // 参考 plugins/music_bot.ts 的结构与实现方式
 
+const htmlEscape = (text: string): string =>
+  text.replace(/[&<>"']/g, (m) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#x27;",
+  }[m] || m));
+
 const prefixes = getPrefixes();
+
 const mainPrefix = prefixes[0];
 
 const bot = "Music163bot"; // 与原实现保持一致（可用 @ 或不带 @）
@@ -95,7 +106,7 @@ async function fetchAndSendAudio(
   let mediaMsg: any | undefined;
   for (let i = 0; i < 20; i++) {
     await sleep(700);
-    const msgs = await client.getMessages(bot, { limit: 6 });
+    const msgs = await safeGetMessages(client, bot, { limit: 6 });
     for (const m of msgs.slice().reverse()) {
       if (!m.out && (m.date || 0) >= startTs) {
         if (!mediaMsg && m.media) mediaMsg = m;
@@ -110,14 +121,15 @@ async function fetchAndSendAudio(
     try {
       await replyWithButtons.click({});
     } catch (e) {
-      await msg.edit({ text: `❌ 点击按钮失败：${(e as any)?.message || e}` });
+        await msg.edit({ text: `❌ 点击按钮失败：${htmlEscape((e as any)?.message || String(e))}`, parseMode: "html" });
+
       return;
     }
 
     // 点击后继续等待媒体
     for (let i = 0; i < 20; i++) {
       await sleep(700);
-      const msgs = await client.getMessages(bot, { limit: 6 });
+      const msgs = await safeGetMessages(client, bot, { limit: 6 });
       for (const m of msgs.slice().reverse()) {
         if (
           !m.out &&
@@ -146,6 +158,7 @@ async function fetchAndSendAudio(
 }
 
 class NeteasePlugin extends Plugin {
+
   description: string = `\nnetease\n\n${help_text}`;
   cmdHandlers: Record<string, (msg: Api.Message) => Promise<void>> = {
     netease: async (msg: Api.Message) => {
@@ -161,7 +174,7 @@ class NeteasePlugin extends Plugin {
 
       try {
         await msg.edit({
-          text: `🔎 处理中：<code>${keyword}</code>`,
+          text: `🔎 处理中：<code>${htmlEscape(keyword)}</code>`,
           parseMode: "html",
         });
       } catch {}
@@ -177,7 +190,7 @@ class NeteasePlugin extends Plugin {
         if (id) commandToBot = `/music ${id}`;
       }
 
-      const caption = `🎵 ${keyword}`;
+      const caption = `🎵 ${htmlEscape(keyword)}`;
       await fetchAndSendAudio(msg, commandToBot, caption);
 
       try {

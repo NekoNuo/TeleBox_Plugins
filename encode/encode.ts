@@ -1,7 +1,8 @@
 import { Plugin } from "@utils/pluginBase";
 import { getGlobalClient } from "@utils/globalClient";
 import { getPrefixes } from "@utils/pluginManager";
-import { Api } from "telegram";
+import { Api } from "teleproto";
+import { safeGetReplyMessage } from "@utils/safeGetMessages";
 
 // HTML转义工具
 const htmlEscape = (text: string): string => 
@@ -33,6 +34,7 @@ const help_text = `🔐 <b>编码解码工具集</b>
 支持回复消息后直接使用命令进行编码/解码`;
 
 class EncodePlugin extends Plugin {
+
   description: string = `编码解码工具插件\n\n${help_text}`;
 
   cmdHandlers: Record<string, (msg: Api.Message) => Promise<void>> = {
@@ -146,7 +148,7 @@ class EncodePlugin extends Plugin {
     // 如果没有提供文本，尝试从回复消息获取
     if (!text.trim()) {
       try {
-        const reply = await msg.getReplyMessage();
+        const reply = await safeGetReplyMessage(msg);
         if (reply && reply.text) {
           text = reply.text.trim();
         } else {

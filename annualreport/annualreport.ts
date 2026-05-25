@@ -1,5 +1,5 @@
 import { Plugin } from "@utils/pluginBase";
-import { Api } from "telegram";
+import { Api } from "teleproto";
 import { getGlobalClient } from "@utils/globalClient";
 import { getPrefixes } from "@utils/pluginManager";
 import { createDirectoryInAssets } from "@utils/pathHelpers";
@@ -14,7 +14,39 @@ const htmlEscape = (text: string): string =>
     '"': '&quot;', "'": '&#x27;' 
   }[m] || m));
 
+async function getAllDialogs(client: any): Promise<any[]> {
+  const dialogMap = new Map<string, any>();
+
+  const collectDialogs = async (params: Record<string, any>) => {
+    try {
+      const dialogs = await client.getDialogs(params);
+      for (const dialog of dialogs || []) {
+        const key = `${dialog.id}`;
+        if (!dialogMap.has(key)) {
+          dialogMap.set(key, dialog);
+        }
+      }
+    } catch (error) {
+      console.error("[AnnualReport] 获取对话列表失败:", error);
+    }
+  };
+
+  await collectDialogs({});
+  await collectDialogs({ folderId: 1 });
+
+  return Array.from(dialogMap.values());
+}
+
 class AnnualReportPlugin extends Plugin {
+  cleanup(): void {
+    // 引用重置：清空实例级 db / cache / manager 引用，便于 reload 后重新初始化。
+    this.db = null;
+  }
+
+  async setup(): Promise<void> {
+    await this.initDB();
+  }
+
   private readonly PLUGIN_NAME = "annualreport";
   private db: any;
   private configPath: string;
@@ -42,7 +74,7 @@ class AnnualReportPlugin extends Plugin {
     let privateCount = 0, groupCount = 0, botsCount = 0, channelCount = 0;
     
     try {
-      const dialogs = await client.getDialogs({});
+      const dialogs = await getAllDialogs(client);
       
       for (const dialog of dialogs) {
         if (dialog.isUser) {
@@ -58,7 +90,7 @@ class AnnualReportPlugin extends Plugin {
         }
       }
     } catch (error) {
-      console.error("[AnnualReport] 获取对话列表失败:", error);
+      console.error("[AnnualReport] 获取对话统计失败:", error);
     }
     
     return { private: privateCount, group: groupCount, bots: botsCount, channel: channelCount };
@@ -161,6 +193,7 @@ class AnnualReportPlugin extends Plugin {
   }
 
   private async handleAnnualReport(msg: Api.Message): Promise<void> {
+    if (!this.db) return;
     const client = await getGlobalClient();
     if (!client) {
       await msg.edit({ text: "❌ 无法获取客户端", parseMode: "html" });
@@ -216,8 +249,7 @@ TeleBox 已陪伴你的 TG ${days} 天
 🛡️ <b>安全守护</b>
 你的黑名单里有 ${blockedCount} 人
 ${blockedText}
-
-${premiumText ? `⭐ <b>会员特权</b>\n${premiumText}\n` : ''}
+${premiumText ? `\n⭐ <b>会员特权</b>\n${premiumText}\n` : ''}
 💫 <b>年度寄语</b>
 ${hitokotoText}
 

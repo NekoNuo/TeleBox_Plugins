@@ -1,9 +1,9 @@
 import axios from "axios";
 import { getPrefixes } from "@utils/pluginManager";
 import { Plugin } from "@utils/pluginBase";
-import { Api } from "telegram";
+import { Api } from "teleproto";
 import { getGlobalClient } from "@utils/globalClient";
-import { CustomFile } from "telegram/client/uploads.js";
+import { CustomFile } from "teleproto/client/uploads.js";
 
 const timeout = 60000;
 const prefixes = getPrefixes();
@@ -16,6 +16,7 @@ const help_text = `
 `;
 
 class HttpCatPlugin extends Plugin {
+
   description: string = `\nHTTP猫猫图片\n\n${help_text}`;
   cmdHandlers: Record<string, (msg: Api.Message) => Promise<void>> = {
     httpcat: async (msg: Api.Message) => {

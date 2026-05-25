@@ -1,9 +1,15 @@
 import { Plugin } from "@utils/pluginBase";
-import { Api } from "telegram";
+import { Api } from "teleproto";
 import { getGlobalClient } from "@utils/globalClient";
+import { getPrefixes } from "@utils/pluginManager";
 import { JSONFilePreset } from "lowdb/node";
 import { createDirectoryInAssets } from "@utils/pathHelpers";
 import * as path from "path";
+
+import { safeGetMe } from "@utils/authGuards";
+const prefixes = getPrefixes();
+const mainPrefix = prefixes[0];
+
 
 const htmlEscape = (text: string): string => 
   text.replace(/[&<>"']/g, m => ({ 
@@ -12,6 +18,7 @@ const htmlEscape = (text: string): string =>
   }[m] || m));
 
 class TeletypePlugin extends Plugin {
+
   private readonly PLUGIN_NAME = "teletype";
   private readonly PLUGIN_VERSION = "1.1.0";
   private db: any = null;
@@ -19,14 +26,14 @@ class TeletypePlugin extends Plugin {
   private readonly HELP_TEXT = `⌨️ <b>打字机效果插件</b>
 
 <b>命令格式：</b>
-<code>.teletype [文本]</code> - 手动打字机效果
-<code>.teletype on</code> - 开启自动模式
-<code>.teletype off</code> - 关闭自动模式
-<code>.teletype status</code> - 查看状态
+<code>${mainPrefix}teletype [文本]</code> - 手动打字机效果
+<code>${mainPrefix}teletype on/off</code> - 开启或关闭自动模式
+<code>${mainPrefix}teletype status</code> - 查看状态
 
 <b>使用示例：</b>
-<code>.teletype Hello World!</code>
-<code>.teletype on</code>`;
+<code>${mainPrefix}teletype Hello World!</code>
+<code>${mainPrefix}teletype on/off</code>
+<code>${mainPrefix}teletype status</code>`;
   
   description = this.HELP_TEXT;
   cmdHandlers = {
@@ -188,7 +195,8 @@ class TeletypePlugin extends Plugin {
     const client = await getGlobalClient();
     if (!client) return;
     
-    const self = await client.getMe();
+    const self = await safeGetMe(client);
+  if (!self) return;
     if (!msg.senderId?.eq(self.id)) return;
     
     try {

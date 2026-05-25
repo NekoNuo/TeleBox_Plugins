@@ -20,9 +20,9 @@
 import axios from "axios";
 import { getPrefixes } from "@utils/pluginManager";
 import { Plugin } from "@utils/pluginBase";
-import { Api } from "telegram";
+import { Api } from "teleproto";
 import { getGlobalClient } from "@utils/globalClient";
-import { CustomFile } from "telegram/client/uploads.js";
+import { CustomFile } from "teleproto/client/uploads.js";
 
 // wallhaven API 接口类型
 interface WallhavenResponse {
@@ -285,6 +285,7 @@ async function getWallpaper(lx: string): Promise<{imageBuffer: Buffer, filename:
 }
 
 class BizhiPlugin extends Plugin {
+
   description: string = `\n高品质壁纸\n\n${help_text}`;
   cmdHandlers: Record<string, (msg: Api.Message) => Promise<void>> = {
     bizhi: async (msg: Api.Message) => {
@@ -313,7 +314,7 @@ class BizhiPlugin extends Plugin {
           // 发送为文件
           await client.sendFile(msg.peerId, {
             file,
-            replyTo: msg.id,
+            replyTo: msg.replyTo?.replyToTopId || msg.id,
             caption: `📁 源文件: ${source}`,
             forceDocument: true // 强制作为文档发送
           });
@@ -321,7 +322,7 @@ class BizhiPlugin extends Plugin {
           // 发送为图片
           await client.sendFile(msg.peerId, {
             file,
-            replyTo: msg.id,
+            replyTo: msg.replyTo?.replyToTopId || msg.id,
             caption: `📸 来源: ${source}`
           });
         }

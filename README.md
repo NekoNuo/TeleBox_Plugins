@@ -11,6 +11,7 @@ tpm i <插件名>
 ## 可用插件列表
 - `aban` - 高级封禁管理  
 - `acron` - 定时发送/转发/复制/置顶/取消置顶/删除消息/执行命令  
+- `admin_board` - 管理员排行榜 末位淘汰  
 - `aff` - 机场Aff信息管理  
 - `ai` - ai聚合  
 - `aitc` - AI Prompt 转写  
@@ -23,6 +24,8 @@ tpm i <插件名>
 - `autodelcmd` - 自动删除命令消息  
 - `autorepeat` - 智能自动复读机  
 - `banana` - Nano-Banana 图像编辑  
+- `bgp` - BGP路由图查询工具  
+- `biko` - 批量获取整理发送指定对话中指定用户的消息  
 - `bin` - 卡头检测  
 - `bizhi` - 发送一张壁纸  
 - `botmzt` - 随机获取写真图片  
@@ -32,6 +35,7 @@ tpm i <插件名>
 - `clean` - 账号清理工具 Pro  
 - `clean_member` - 群组成员清理  
 - `clear_sticker` - 批量删除群组内贴纸  
+- `codex_image` - 通过codex调用gpt-image-2  
 - `convert` - 视频转音频  
 - `copy_sticker_set` - 复制贴纸包  
 - `cosplay` - 获取随机cos写真  
@@ -39,6 +43,7 @@ tpm i <插件名>
 - `da` - 删除群内所有消息  
 - `dbdj` - 点兵点将 - 从最近的消息中随机抽取指定人数的用户  
 - `dc` - 获取实体DC  
+- `deepwiki` - DeepWiki多项目聚合  
 - `dig` - DNS 查询  
 - `diss` - 儒雅随和版祖安语录  
 - `dme` - 删除指定数量的自己发送的消息  
@@ -86,12 +91,13 @@ tpm i <插件名>
 - `pmcaptcha` - 简单防私聊  
 - `portball` - 临时禁言  
 - `premium` - 群组大会员统计  
-- `prometheus` - 突破Telegram保存限制  
 - `q` - 消息引用生成贴纸  
 - `qr` - QR 二维码  
+- `quote` - 引用贴纸生成 (本地版)  
 - `rate` - 货币实时汇率查询与计算  
 - `restore_pin` - 恢复群组被取消的置顶消息  
 - `rev` - 反转你的消息  
+- `save` - 本地保存插件  
 - `search` - 频道消息搜索  
 - `service` - systemd服务状态查看  
 - `shift` - 智能消息转发系统  
@@ -106,7 +112,9 @@ tpm i <插件名>
 - `sum` - 群消息总结  
 - `t` - 文字转语音  
 - `teletype` - 打字机效果  
+- `tmp_admin` - 临时管理员  
 - `trace` - 全局追踪点赞  
+- `tts` - Azure文字转语音  
 - `uai` - 引用消息 AI 分析  
 - `warp` - warp管理  
 - `weather` - 天气查询  
@@ -123,7 +131,7 @@ tpm i <插件名>
 - **开发语言**: TypeScript
 - **数据库**: Lowdb
 - **任务调度**: node-schedule
-- **Telegram API**: telegram (GramJS)
+- **Telegram API**: Teleproto
 - **图像处理**: Sharp
 - **其他依赖**: axios, lodash 等
   

@@ -1,10 +1,11 @@
 import { Plugin } from "@utils/pluginBase";
-import { Api } from "telegram";
+import { Api } from "teleproto";
 import { getPrefixes } from "@utils/pluginManager";
-import { sleep } from "telegram/Helpers";
+import { sleep } from "teleproto/Helpers";
 import { createDirectoryInAssets } from "@utils/pathHelpers";
 import * as path from "path";
 import * as fs from "fs";
+import { safeGetMessages, safeGetReplyMessage } from "@utils/safeGetMessages";
 
 const BOT_USERNAME = "ParseHubot";
 const POLL_INTERVAL_MS = 2000;
@@ -144,7 +145,7 @@ async function ensureBotReady(msg: Api.Message) {
   }
 
   try {
-    const history = await client.getMessages(BOT_USERNAME, { limit: 1 });
+    const history = await safeGetMessages(client, BOT_USERNAME, { limit: 1 });
     if (history.length > 0) {
       hasStartedBot = true;
       return;
@@ -198,7 +199,7 @@ async function ensureBotReady(msg: Api.Message) {
 async function getLatestBotMessageId(client: any): Promise<number> {
   if (!client) return 0;
   try {
-    const history = await client.getMessages(BOT_USERNAME, { limit: 1 });
+    const history = await safeGetMessages(client, BOT_USERNAME, { limit: 1 });
     if (history.length > 0) {
       return history[0].id;
     }
@@ -272,7 +273,7 @@ async function relayParseResult(
 
     let messages: Api.Message[] = [];
     try {
-      messages = await client.getMessages(BOT_USERNAME, { limit: FETCH_LIMIT });
+      messages = await safeGetMessages(client, BOT_USERNAME, { limit: FETCH_LIMIT });
     } catch (error: any) {
       return {
         lastId,
@@ -371,6 +372,7 @@ async function relayParseResult(
 }
 
 class ParseHubPlugin extends Plugin {
+
   description: string = `\n${pluginName}\n\n${helpText}`;
   cmdHandlers: Record<string, (msg: Api.Message) => Promise<void>> = {
     parsehub: async (msg: Api.Message) => {
@@ -384,7 +386,7 @@ class ParseHubPlugin extends Plugin {
       // 若命令未包含链接且为回复消息，从被回复消息中提取链接
       if (!links.length && msg.replyTo?.replyToMsgId) {
         try {
-          const replied = await msg.getReplyMessage();
+          const replied = await safeGetReplyMessage(msg);
           const replyText = replied?.message || "";
           const replyLinks = extractLinks(replyText);
           if (replyLinks.length) {
@@ -396,7 +398,7 @@ class ParseHubPlugin extends Plugin {
       // 若命令和被回复消息都包含链接，合并去重，命令里的在前
       if (msg.replyTo?.replyToMsgId) {
         try {
-          const replied = await msg.getReplyMessage();
+          const replied = await safeGetReplyMessage(msg);
           const replyText = replied?.message || "";
           const replyLinks = extractLinks(replyText);
           if (replyLinks.length) {
@@ -453,10 +455,10 @@ class ParseHubPlugin extends Plugin {
         baselineId = outcome.lastId;
 
         if (!outcome.forwarded) {
-          const reasonText = describeReason(outcome.reason);
+          const reasonText = htmlEscape(describeReason(outcome.reason));
           const detail =
             outcome.error && outcome.error !== "undefined"
-              ? `\n\n错误信息：${outcome.error}`
+              ? `\n\n错误信息：${htmlEscape(outcome.error)}`
               : "";
           await client.sendMessage(msg.peerId, {
             message: `⚠️ 未能获取 <b>${htmlEscape(link)}</b> 的最终结果（${reasonText}）。请稍后重试或直接私聊 @${BOT_USERNAME}。${detail}`,

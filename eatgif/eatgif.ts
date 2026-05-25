@@ -8,10 +8,11 @@ import {
 import { getPrefixes } from "@utils/pluginManager";
 import path from "path";
 import fs from "fs";
-import { Api } from "telegram";
+import { Api } from "teleproto";
 import { encode, UnencodedFrame } from "modern-gif";
 import { exec } from "child_process";
 import { promisify } from "util";
+import { safeGetReplyMessage } from "@utils/safeGetMessages";
 
 const execAsync = promisify(exec);
 
@@ -118,6 +119,7 @@ async function assetBufferFor(filePath: string): Promise<Buffer> {
 }
 
 class EatGifPlugin extends Plugin {
+
   description: string = `生成头像融合动图\n\n${help_text}`;
   cmdHandlers: Record<
     string,
@@ -208,12 +210,6 @@ class EatGifPlugin extends Plugin {
     fs.rmSync(ASSET_PATH, { recursive: true, force: true });
     await loadGifListConfig(baseConfigURL);
     await msg.edit({ text: "🧹 已清理缓存并刷新配置", parseMode: "html" });
-  }
-
-  private getRandomEatGif(): string {
-    let keys = Object.keys(config);
-    const randomIndex = Math.floor(Math.random() * keys.length);
-    return keys[randomIndex];
   }
 
   private async generateGif(
@@ -308,14 +304,14 @@ class EatGifPlugin extends Plugin {
             stickerset: new Api.InputStickerSetEmpty(),
           }),
         ],
-        replyTo: await msg.getReplyMessage(),
+        replyTo: await safeGetReplyMessage(msg),
       });
     } catch (e) {
       console.log("exec ffmpeg error", e);
       await msg.edit({ text: `生成 webm 失败 ${e}` });
       await msg.client?.sendFile(msg.peerId, {
         file: gifPath,
-        replyTo: await msg.getReplyMessage(),
+        replyTo: await safeGetReplyMessage(msg),
       });
     }
 
@@ -434,9 +430,9 @@ class EatGifPlugin extends Plugin {
     msg: Api.Message,
     trigger?: Api.Message
   ): Promise<Buffer | undefined> {
-    let replyTo = await msg.getReplyMessage();
+    let replyTo = await safeGetReplyMessage(msg);
     if (!replyTo) {
-      replyTo = await trigger?.getReplyMessage();
+      replyTo = await safeGetReplyMessage(trigger);
     }
     if (!replyTo?.senderId) return;
     const avatarBuffer = await msg.client?.downloadProfilePhoto(
@@ -512,12 +508,6 @@ class EatGifPlugin extends Plugin {
       .toBuffer();
   }
 
-  private async getMediaAvatarBuffer(
-    msg: Api.Message,
-    trigger?: Api.Message
-  ): Promise<Buffer | undefined> {
-    return;
-  }
 }
 
 export default new EatGifPlugin();

@@ -1,6 +1,16 @@
 import { Plugin } from "@utils/pluginBase";
-import { Api, TelegramClient } from "telegram";
+import { Api, TelegramClient } from "teleproto";
 import { getGlobalClient } from "@utils/globalClient";
+import { safeGetReplyMessage } from "@utils/safeGetMessages";
+
+const htmlEscape = (text: string): string =>
+  text.replace(/[&<>"']/g, (m) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#x27;",
+  }[m] || m));
 
 const dc = async (msg: Api.Message) => {
   const args = msg.message.slice(1).split(" ").slice(1);
@@ -32,7 +42,7 @@ const dc = async (msg: Api.Message) => {
   try {
     // 如果是回复消息
     if (msg.replyTo) {
-      const replyMessage = await msg.getReplyMessage();
+      const replyMessage = await safeGetReplyMessage(msg);
       if (!replyMessage) {
         await msg.edit({
           text: "❌ 无法获取回复的消息",
@@ -70,7 +80,7 @@ const dc = async (msg: Api.Message) => {
         const photo = user.photo as Api.UserProfilePhoto;
         const firstName = user.firstName || "未知用户";
         await msg.edit({
-          text: `📍 <b>${firstName}</b> 所在数据中心为: <b>DC${photo.dcId}</b>`,
+          text: `📍 <b>${htmlEscape(firstName)}</b> 所在数据中心为: <b>DC${photo.dcId}</b>`,
           parseMode: "html",
         });
         return;
@@ -94,7 +104,7 @@ const dc = async (msg: Api.Message) => {
           const photo = chat.photo as Api.ChatPhoto;
           const title = "title" in chat ? (chat as any).title : "未知聊天";
           await msg.edit({
-            text: `📍 <b>${title}</b> 所在数据中心为: <b>DC${photo.dcId}</b>`,
+            text: `📍 <b>${htmlEscape(title)}</b> 所在数据中心为: <b>DC${photo.dcId}</b>`,
             parseMode: "html",
           });
           return;
@@ -127,7 +137,7 @@ const dc = async (msg: Api.Message) => {
       const photo = chat.photo as Api.ChatPhoto;
       const title = "title" in chat ? (chat as any).title : "当前聊天";
       await msg.edit({
-        text: `📍 <b>${title}</b> 所在数据中心为: <b>DC${photo.dcId}</b>`,
+        text: `📍 <b>${htmlEscape(title)}</b> 所在数据中心为: <b>DC${photo.dcId}</b>`,
         parseMode: "html",
       });
       return;
@@ -202,7 +212,7 @@ const dc = async (msg: Api.Message) => {
       const photo = user.photo as Api.UserProfilePhoto;
       const firstName = user.firstName || "未知用户";
       await msg.edit({
-        text: `📍 <b>${firstName}</b> 所在数据中心为: <b>DC${photo.dcId}</b>`,
+        text: `📍 <b>${htmlEscape(firstName)}</b> 所在数据中心为: <b>DC${photo.dcId}</b>`,
         parseMode: "html",
       });
     } catch (error) {
@@ -231,11 +241,11 @@ const dc = async (msg: Api.Message) => {
       } else {
         console.error("DC插件获取用户信息失败:", error);
         await msg.edit({
-          text: `❌ <b>获取用户信息失败:</b> ${
+          text: `❌ <b>获取用户信息失败:</b> ${htmlEscape(
             errorStr.length > 100
               ? errorStr.substring(0, 100) + "..."
               : errorStr
-          }`,
+          )}`,
           parseMode: "html",
         });
       }
@@ -243,13 +253,14 @@ const dc = async (msg: Api.Message) => {
   } catch (error) {
     console.error("DC插件执行失败:", error);
     await msg.edit({
-      text: `❌ <b>DC 查询失败:</b> ${String(error)}`,
+      text: `❌ <b>DC 查询失败:</b> ${htmlEscape(String(error))}`,
       parseMode: "html",
     });
   }
 };
 
 class DcPlugin extends Plugin {
+
   description: string = `获取指定用户或当前群组/频道的 DC`;
   cmdHandlers: Record<string, (msg: Api.Message) => Promise<void>> = {
     dc,

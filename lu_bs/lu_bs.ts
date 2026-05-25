@@ -1,10 +1,14 @@
 // plugins/lu_bs.ts
 import { Plugin } from "@utils/pluginBase";
-import { Api } from "telegram";
+import { Api } from "teleproto";
 import { getGlobalClient } from "@utils/globalClient";
+import { getPrefixes } from "@utils/pluginManager";
 import { JSONFilePreset } from "lowdb/node";
 import { createDirectoryInAssets } from "@utils/pathHelpers";
 import * as path from "path";
+
+const prefixes = getPrefixes();
+const mainPrefix = prefixes[0];
 
 // HTML转义函数
 const htmlEscape = (text: string): string => 
@@ -22,17 +26,26 @@ const HELP_TEXT = `🕒 <b>鲁小迅整点报时</b>
 • 支持群组和私聊订阅
 
 <b>可用命令：</b>
-• <code>.lu_bs sub</code> - 订阅整点报时
-• <code>.lu_bs unsub</code> - 退订整点报时
-• <code>.lu_bs list</code> - 查看订阅状态
-• <code>.lu_bs reload</code> - 重新加载贴纸包
-• <code>.lu_bs help</code> - 显示此帮助
+• <code>${mainPrefix}lu_bs sub</code> - 订阅整点报时
+• <code>${mainPrefix}lu_bs unsub</code> - 退订整点报时
+• <code>${mainPrefix}lu_bs list</code> - 查看订阅状态
+• <code>${mainPrefix}lu_bs reload</code> - 重新加载贴纸包
 
 <b>注意事项：</b>
 • 需要管理员权限才能操作群组订阅
 • 请先添加贴纸包: <code>https://t.me/addstickers/luxiaoxunbs</code>`;
 
 class LuBsPlugin extends Plugin {
+  cleanup(): void {
+    this.db = null;
+    this.stickerSet = null;
+  }
+
+  async setup(): Promise<void> {
+    await this.initDB();
+    await this.loadStickerSet();
+  }
+
   private db: any = null;
   private stickerSet: any = null;
   private readonly PLUGIN_NAME = "lu_bs";
@@ -184,8 +197,9 @@ class LuBsPlugin extends Plugin {
       
       // 群组/频道需要检查管理员权限
       if (chat.className === "Channel" || chat.className === "Chat") {
-        const participant = await client.getParticipant(chat, sender);
-        return participant && (
+        const result = await client.invoke(new Api.channels.GetParticipant({ channel: chat as any, participant: sender as any })) as any;
+        const participant = result?.participant;
+        return !!participant && (
           participant instanceof Api.ChannelParticipantAdmin ||
           participant instanceof Api.ChannelParticipantCreator ||
           participant instanceof Api.ChatParticipantAdmin ||
@@ -335,9 +349,9 @@ class LuBsPlugin extends Plugin {
     text += `• 总订阅数: <code>${totalSubscriptions}</code>\n\n`;
     
     if (isSubscribed) {
-      text += "💡 使用 <code>.lu_bs unsub</code> 退订";
+      text += "💡 使用 <code>${mainPrefix}lu_bs unsub</code> 退订";
     } else {
-      text += "💡 使用 <code>.lu_bs sub</code> 订阅";
+      text += "💡 使用 <code>${mainPrefix}lu_bs sub</code> 订阅";
     }
 
     await msg.edit({ text, parseMode: "html" });

@@ -2,12 +2,13 @@ import { Plugin } from "@utils/pluginBase";
 import { getGlobalClient } from "@utils/globalClient";
 import { getPrefixes } from "@utils/pluginManager";
 import { createDirectoryInAssets, createDirectoryInTemp } from "@utils/pathHelpers";
-import { Api } from "telegram";
+import { Api } from "teleproto";
 import sharp from "sharp";
 import * as fs from "fs";
 import * as path from "path";
 import { JSONFilePreset } from "lowdb/node";
-import { sleep } from "telegram/Helpers";
+import { sleep } from "teleproto/Helpers";
+import { safeGetMessages } from "@utils/safeGetMessages";
 
 // 必需工具函数
 const htmlEscape = (text: string): string => 
@@ -32,6 +33,7 @@ interface PicToStickerConfig {
 }
 
 class PicToStickerPlugin extends Plugin {
+
   private help_text = `🖼️ <b>图片转贴纸工具</b>
 
 <b>📝 功能：</b>
@@ -46,7 +48,6 @@ class PicToStickerPlugin extends Plugin {
 • <code>${mainPrefix}pts [表情]</code> - 使用自定义表情
 • <code>${mainPrefix}pts config</code> - 查看/修改配置
 • <code>${mainPrefix}pts batch</code> - 批量转换（回复多张图片）
-• <code>${mainPrefix}pts help</code> - 显示帮助
 
 <b>⚙️ 配置选项：</b>
 • <code>${mainPrefix}pts config emoji [表情]</code> - 设置默认表情
@@ -286,7 +287,7 @@ class PicToStickerPlugin extends Plugin {
 
       // 获取回复的消息
       const replyMsgId = msg.replyTo.replyToMsgId;
-      const messages = await client.getMessages(msg.peerId!, {
+      const messages = await safeGetMessages(client, msg.peerId!, {
         ids: [replyMsgId]
       } as any);
 
@@ -323,7 +324,7 @@ class PicToStickerPlugin extends Plugin {
           }
         } else if ((targetMsg as any).groupedId) {
           // 媒体组（多张图片）
-          const groupMessages = await client.getMessages(msg.peerId!, {
+          const groupMessages = await safeGetMessages(client, msg.peerId!, {
             limit: 10,
             offsetId: targetMsg.id
           } as any);
@@ -384,7 +385,7 @@ class PicToStickerPlugin extends Plugin {
       // 检查是否回复了消息
       if (msg.replyTo && 'replyToMsgId' in msg.replyTo && msg.replyTo.replyToMsgId) {
         const replyMsgId = msg.replyTo.replyToMsgId;
-        const messages = await client.getMessages(msg.peerId!, {
+        const messages = await safeGetMessages(client, msg.peerId!, {
           ids: [replyMsgId]
         });
         
@@ -396,7 +397,6 @@ class PicToStickerPlugin extends Plugin {
       // 检查是否有图片
       if (!targetMsg.media || !(targetMsg.media instanceof Api.MessageMediaPhoto)) {
         await msg.edit({
-          text: `❌ <b>请回复一张图片</b>\n\n💡 使用 <code>${mainPrefix}pts help</code> 查看帮助`,
           parseMode: "html"
         });
         return;

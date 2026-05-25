@@ -1,23 +1,29 @@
-import { Plugin } from "../src/utils/pluginBase";
-import { getGlobalClient } from "../src/utils/globalClient";
-import { Api } from "telegram";
+import { Plugin } from "@utils/pluginBase";
+import { getGlobalClient } from "@utils/globalClient";
+import { getPrefixes } from "@utils/pluginManager";
+import { Api } from "teleproto";
 import fs from "fs";
 import path from "path";
-import { createDirectoryInTemp } from "../src/utils/pathHelpers";
+import { createDirectoryInTemp } from "@utils/pathHelpers";
 import { exec } from "child_process";
 import { promisify } from "util";
+import { safeGetMessages } from "@utils/safeGetMessages";
+
+const prefixes = getPrefixes();
+const mainPrefix = prefixes[0];
 
 const execAsync = promisify(exec);
 
 
 class AudioToVoicePlugin extends Plugin {
+
   description: string = `🎙️ <b>音频转语音</b><br/><br/>
 <b>命令</b><br/>
-• <code>.audio_to_voice</code>（回复一条包含音乐的消息）<br/><br/>
+• <code>${mainPrefix}audio_to_voice</code>（回复一条包含音乐的消息）<br/><br/>
 <b>功能</b><br/>
 • 将音乐文件转换为 Telegram 语音消息（OGG/Opus）<br/><br/>
 <b>用法</b><br/>
-1) 回复音乐文件发送 <code>.audio_to_voice</code><br/><br/>
+1) 回复音乐文件发送 <code>${mainPrefix}audio_to_voice</code><br/><br/>
 <b>依赖</b><br/>
 • 需要系统安装 FFmpeg`;
   
@@ -32,7 +38,7 @@ class AudioToVoicePlugin extends Plugin {
 
 
     if (msg.replyToMsgId) {
-      const messages = await client.getMessages(msg.peerId!, {
+      const messages = await safeGetMessages(client, msg.peerId!, {
         ids: [msg.replyToMsgId]
       });
       
