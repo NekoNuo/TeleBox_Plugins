@@ -5,7 +5,7 @@ import * as path from "path";
 import * as os from "os";
 import { createDirectoryInTemp } from "@utils/pathHelpers";
 import { npm_install } from "@utils/npm_install";
-import { execFile } from "child_process";
+const { execFile } = require("child_process");
 import { safeGetReplyMessage, safeGetMessages } from "@utils/safeGetMessages";
 import { getPrefixes } from "@utils/pluginManager";
 
@@ -17,23 +17,11 @@ const EMOJI_SUFFIXES = [
   "😀", "😃", "😄", "😁", "😆", "😅", "😂", "🤣", "😊", "😇", "🙂", "🙃", "😉", "😌", "😍", "🥰", "😘", "😗", "😙", "😚", "😋", "😛", "😝", "😜", "🤪", "🤨", "🧐", "🤓", "😎", "🤩", "🥳", "😏", "😒", "😞", "😔", "😟", "😕", "🙁", "☹️", "😣", "😖", "😫", "😩", "🥺", "😢", "😭", "😤", "😠", "😡", "🤬", "🤯", "😳", "🥵", "🥶", "😱", "😨", "😰", "😥", "😓", "🤗", "🤔", "🤭", "🤫", "🤥", "😶", "😐", "😑", "😬", "🙄", "😯", "😦", "😧", "😮", "😲", "🥱", "😴", "🤤", "😪", "😵", "🤐", "🥴", "🤢", "🤮", "🤧", "😷", "🤒", "🤕", "🤑", "🤠", "😈", "👿", "👹", "👺", "🤡", "💩", "👻", "💀", "☠️", "👽", "👾", "🤖", "🎃", "😺", "😸", "😹", "😻", "😼", "😽", "🙀", "😿", "😾"
 ];
 
-const MAX_CACHE_SIZE = 500;
 const customEmojiCache = new Map<string, Buffer | undefined>();
 const animatedCustomEmojiCache = new Map<string, Buffer | undefined>();
 const animatedFrameCache = new Map<string, AnimatedFrameSet>();
 const entityCache = new Map<string, any>();
 const avatarCache = new Map<string, Buffer | undefined>();
-
-function trimCache<K, V>(cache: Map<K, V>): void {
-  if (cache.size <= MAX_CACHE_SIZE) return;
-  const excess = cache.size - MAX_CACHE_SIZE;
-  let count = 0;
-  for (const key of Array.from(cache.keys())) {
-    if (count >= excess) break;
-    cache.delete(key);
-    count++;
-  }
-}
 const EMOJI_FETCH_CONCURRENCY = 8;
 const QUOTE_MESSAGE_CONCURRENCY = 8;
 const ANIMATED_FRAME_CONCURRENCY = 4;
@@ -43,12 +31,16 @@ const TG_STICKER_MAX_FRAMES = 100;
 const TG_STICKER_MAX_BYTES = 512 * 1024;
 const WEBM_CRF_STEPS = [38, 44, 50, 56];
 
-const QUOTE_PLUGIN_VERSION = "1.00";
+const QUOTE_PLUGIN_VERSION = "1.01";
 const QUOTE_BASE_URL = "https://raw.githubusercontent.com/TeleBoxOrg/TeleBox_Plugins/main/quote";
 const QUOTE_ASSETS_BASE_URL = "https://raw.githubusercontent.com/LyoSU/quote-api/master/assets";
 const QUOTE_VENDOR_DIR = path.join(quotePluginDir(), "quote", "vendor");
 const QUOTE_ASSETS_DIR = path.join(process.cwd(), "assets", "quote");
+// npm packages required by vendor/ at module load that are NOT in the host
+// package.json. Installed on demand in getQuoteGen() before requiring generate.js.
+const QUOTE_VENDOR_NPM_DEPS = ["telegraf", "lru-cache", "runes", "jimp", "smartcrop-sharp", "emoji-db"];
 const QUOTE_DEP_FILES = [
+  "generate.js",
   "vendor/emoji-db.js",
   "vendor/emoji-image.js",
   "vendor/image-load-path.js",
@@ -183,6 +175,11 @@ async function getQuoteGen(): Promise<any> {
       await ensureQuoteAssets();
       requireOrInstall("canvas");
       requireOrInstall("sharp");
+      // vendor/ pulls these in at module load (quote-generate/index.js requires
+      // telegraf; avatar.js requires lru-cache + runes; media.js requires jimp +
+      // smartcrop-sharp; emoji-db.js requires emoji-db). They are not declared in
+      // the host package.json, so install on demand or generate.js fails to load.
+      for (const dep of QUOTE_VENDOR_NPM_DEPS) requireOrInstall(dep);
       return require("./quote/generate");
     })();
   }
@@ -195,6 +192,39 @@ function quoteMs(start: number): number {
 
 function quoteTiming(label: string, start: number, extra?: Record<string, any>): void {
   console.warn("quote timing", label, `${quoteMs(start)}ms`, extra || "");
+}
+
+// Timeout budgets (ms) for MTProto RPCs inside the quote pipeline. Telegram RPCs
+// have NO inherent timeout: when the MTProto connection drops/reconnects (which
+// happens regularly), an in-flight RPC promise neither resolves nor rejects — it
+// sits in the pending-resend queue forever. A bare `.catch()` cannot rescue an
+// unsettled promise, so the whole command hangs silently with no error and the
+// bot appears unresponsive. We race every RPC against a timer so a stuck call
+// rejects, hits the handler's try/catch, and surfaces an error to the user.
+const QUOTE_RPC_TIMEOUT_MS = 20000; // per individual RPC (getMessages / edit / reply / delete)
+const QUOTE_TOTAL_TIMEOUT_MS = 90000; // hard ceiling for the entire command
+
+class QuoteTimeoutError extends Error {
+  constructor(label: string, ms: number) {
+    super(`quote operation "${label}" timed out after ${ms}ms (likely a stalled Telegram RPC during a connection drop)`);
+    this.name = "QuoteTimeoutError";
+  }
+}
+
+/**
+ * Race a promise against a timeout. On timeout the returned promise REJECTS with
+ * QuoteTimeoutError (so the caller's try/catch can report it) and the timer is
+ * always cleared to avoid leaks. The underlying RPC is abandoned, not cancelled —
+ * gramjs has no cancel — but it no longer blocks the command from completing.
+ */
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  let timer: NodeJS.Timeout;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new QuoteTimeoutError(label, ms)), ms);
+    // Don't keep the event loop alive solely for this timer.
+    if (typeof timer.unref === "function") timer.unref();
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer)) as Promise<T>;
 }
 
 type QuoteArgs = {
@@ -365,13 +395,11 @@ async function getPeerEntity(client: any, peer: any): Promise<any | undefined> {
   try {
     const entity = await client.getEntity(peer);
     entityCache.set(key, entity);
-    trimCache(entityCache);
     return entity;
   } catch (_) {
     try {
       const entity = await client.getInputEntity(peer);
       entityCache.set(key, entity);
-      trimCache(entityCache);
       return entity;
     } catch (_) {
       entityCache.set(key, undefined);
@@ -388,13 +416,11 @@ async function senderEntity(msg: Api.Message): Promise<any | undefined> {
     const sender = await (msg as any).getSender?.();
     if (sender) {
       if (key) entityCache.set(key, sender);
-      trimCache(entityCache);
       return sender;
     }
   } catch (_) {}
   const entity = await getPeerEntity((msg as any).client, peer);
   if (key) entityCache.set(key, entity);
-  trimCache(entityCache);
   return entity;
 }
 
@@ -549,7 +575,6 @@ async function downloadEntityAvatar(client: any, entity: any): Promise<Buffer | 
   const [small, big] = await Promise.all([tryDownload(false), tryDownload(true)]);
   const normalized = small ? await normalizeAvatarBuffer(small) : big ? await normalizeAvatarBuffer(big) : undefined;
   if (key) avatarCache.set(key, normalized);
-  trimCache(avatarCache);
   return normalized;
 }
 
@@ -1012,7 +1037,6 @@ async function generateAnimatedQuoteWebm(quoteMessages: any[], args: QuoteArgs):
     quoteTiming("animated.extract_source", tx, { kind: source.kind, key: String(source.key), frames: frames.length, size: source.size, rawKind: bufferKind(source.raw), rawBytes: source.raw.length });
     const frameSet: AnimatedFrameSet = { frames, fps, duration: source.info.duration, cacheKey };
     if (source.kind === "emoji" && frames.length) animatedFrameCache.set(cacheKey, frameSet);
-    trimCache(animatedFrameCache);
     return { source, frameSet };
   });
   quoteTiming("animated.extract_all", textract, { sources: sources.length, frameCount });
@@ -1110,10 +1134,8 @@ async function hydrateCustomEmojiBuffers(client: any, messages: any[]): Promise<
     let rawBuffer = await downloadCustomEmojiAnimatedPreferred(client, doc);
     const wasAnimated = looksLikeAnimatedEmoji(rawBuffer);
     if (isAnimatedRasterBuffer(rawBuffer)) animatedCustomEmojiCache.set(id, rawBuffer);
-    trimCache(animatedCustomEmojiCache);
     const buffer = await normalizeCustomEmojiBuffer(rawBuffer);
     customEmojiCache.set(id, buffer);
-    trimCache(customEmojiCache);
     console.warn("quote custom emoji loaded", id, buffer ? buffer.length : 0, wasAnimated ? "animated-converted" : "static", "source", isGifBuffer(rawBuffer) ? "gif" : isWebmBuffer(rawBuffer) ? "webm" : "other", "mime", doc.mimeType || doc.mime_type || "", "thumbs", doc.thumbs?.length || 0, "videoThumbs", doc.videoThumbs?.length || doc.video_thumbs?.length || 0);
   });
   const loadedDocIds = new Set(docs.map((doc: any) => String(doc.id ?? doc.documentId ?? doc.document_id ?? "")).filter(Boolean));
@@ -1239,7 +1261,7 @@ async function toQuoteMessage(msg: Api.Message, args: QuoteArgs): Promise<any> {
 }
 
 async function collectMessages(msg: Api.Message, args: QuoteArgs): Promise<Api.Message[]> {
-  const reply = await safeGetReplyMessage(msg).catch(() => undefined);
+  const reply = await withTimeout(safeGetReplyMessage(msg), QUOTE_RPC_TIMEOUT_MS, "collectMessages.getReply").catch(() => undefined);
   const count = args.count || 1;
 
   const peer = (msg as any).inputChat ?? (msg as any).peerId ?? (msg as any).chatId;
@@ -1253,7 +1275,7 @@ async function collectMessages(msg: Api.Message, args: QuoteArgs): Promise<Api.M
     const params = count > 0
       ? { offsetId: baseId - 1, limit, reverse: true }
       : { offsetId: baseId + 1, limit };
-    const messages = await safeGetMessages(client, peer, params).catch(() => []);
+    const messages = await withTimeout(safeGetMessages(client, peer, params), QUOTE_RPC_TIMEOUT_MS, "collectMessages.getMessages.reply").catch(() => []);
     const result = (Array.isArray(messages) ? messages : []).filter(isApiMessage).sort((a: any, b: any) => a.id - b.id) as Api.Message[];
     console.warn("quote collect messages", { reply: true, count, baseId, params, got: result.map((m: any) => m.id) });
     return result.length ? result : [reply];
@@ -1265,7 +1287,7 @@ async function collectMessages(msg: Api.Message, args: QuoteArgs): Promise<Api.M
   const params = count > 0
     ? { offsetId: commandId, limit }
     : { offsetId: commandId + 1, limit };
-  const messages = await safeGetMessages(client, peer, params).catch(() => []);
+  const messages = await withTimeout(safeGetMessages(client, peer, params), QUOTE_RPC_TIMEOUT_MS, "collectMessages.getMessages.command").catch(() => []);
   const result = (Array.isArray(messages) ? messages : []).filter(isApiMessage).sort((a: any, b: any) => a.id - b.id) as Api.Message[];
   console.warn("quote collect messages", { reply: false, count, commandId, params, got: result.map((m: any) => m.id) });
   return result.length ? result : [msg];
@@ -1276,7 +1298,7 @@ function hasExplicitCount(argsText: string): boolean {
 }
 
 async function quoteStickerReplyTargetId(commandMsg: Api.Message, quoteMessages: Api.Message[], argsText: string): Promise<any> {
-  const replied = await safeGetReplyMessage(commandMsg).catch(() => undefined);
+  const replied = await withTimeout(safeGetReplyMessage(commandMsg), QUOTE_RPC_TIMEOUT_MS, "quoteStickerReplyTargetId.getReply").catch(() => undefined);
   if (replied && (replied as any).id) return (replied as any).id;
 
   // Direct `.q <number>` quotes surrounding messages, so there is no single referenced message.
@@ -1288,10 +1310,12 @@ async function quoteStickerReplyTargetId(commandMsg: Api.Message, quoteMessages:
 
 async function editProgress(msg: Api.Message, text: string): Promise<void> {
   try {
-    if (typeof (msg as any).edit === "function") await (msg as any).edit({ text });
-    else await (msg as any).client?.editMessage?.((msg as any).chatId ?? (msg as any).peerId, { message: msg.id, text });
+    if (typeof (msg as any).edit === "function") await withTimeout((msg as any).edit({ text }), QUOTE_RPC_TIMEOUT_MS, "editProgress.edit");
+    else await withTimeout((msg as any).client?.editMessage?.((msg as any).chatId ?? (msg as any).peerId, { message: msg.id, text }), QUOTE_RPC_TIMEOUT_MS, "editProgress.editMessage");
   } catch (_) {
-    try { await msg.reply({ message: text } as any); } catch (_) {}
+    // Progress text is best-effort. If editing stalls (e.g. connection drop) or
+    // fails, fall back to a reply but never let it block / hang the command.
+    try { await withTimeout(msg.reply({ message: text } as any), QUOTE_RPC_TIMEOUT_MS, "editProgress.reply"); } catch (_) {}
   }
 }
 
@@ -1302,14 +1326,6 @@ export class QuotePlugin {
     quote: async (msg: Api.Message) => this.handleQuote(msg, "quote"),
   };
 
-  cleanup(): void {
-    customEmojiCache.clear();
-    animatedCustomEmojiCache.clear();
-    animatedFrameCache.clear();
-    entityCache.clear();
-    avatarCache.clear();
-  }
-
   private async handleQuote(msg: Api.Message, command: "q" | "quote") {
       const rawText = ((msg as any).message || (msg as any).text || "") as string;
       const argsText = getCommandArgsText(msg, command);
@@ -1319,6 +1335,11 @@ export class QuotePlugin {
       await editProgress(msg, quoteResourcesReady() ? "⏳ 正在生成 quote…" : "⏳ 首次使用，正在初始化 quote 资源…");
 
       try {
+        // Hard ceiling on the entire pipeline. Even if some future await inside
+        // here lacks its own timeout (vendor render, on-demand npm install, an
+        // RPC we forgot to wrap), this guarantees the command cannot hang forever:
+        // it rejects after QUOTE_TOTAL_TIMEOUT_MS and the catch below reports it.
+        await withTimeout((async () => {
         const tCollect = Date.now();
         const messages = await collectMessages(msg, args);
         quoteTiming("main.collect_messages", tCollect, { count: messages.length, ids: messages.map((m: any) => m.id) });
@@ -1372,15 +1393,16 @@ export class QuotePlugin {
           sendOptions.attributes = [];
         }
         const tSend = Date.now();
-        await msg.reply(sendOptions as any);
+        await withTimeout(msg.reply(sendOptions as any), QUOTE_RPC_TIMEOUT_MS, "main.send_reply");
         quoteTiming("main.send_reply", tSend, { ext: result.ext, bytes: result.image?.length || 0 });
         try {
-          await (msg as any).delete?.();
+          await withTimeout((msg as any).delete?.(), QUOTE_RPC_TIMEOUT_MS, "main.delete_source");
           console.warn("quote command source deleted", { id: (msg as any).id });
         } catch (deleteErr: any) {
           console.warn("quote command source delete failed", deleteErr?.message || deleteErr);
         }
         console.warn("quote command finished", { ms: Date.now() - quoteStartedAt, bytes: result.image?.length, ext: result.ext, replyTo: replyTargetId });
+        })(), QUOTE_TOTAL_TIMEOUT_MS, "handleQuote.pipeline");
       } catch (err: any) {
         console.error("quote command failed", err?.stack || err?.message || err);
         await editProgress(msg, `❌ quote 失败：${err?.message || err}`);
